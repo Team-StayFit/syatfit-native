@@ -1,5 +1,13 @@
 {
-  "enabledPlugins": {
-    "expo@claude-plugins-official": true
+  "permissions": {
+    "allow": [
+      "Bash(npm --version)",
+      "PowerShell($src = \"c:\\\\Users\\\\user\\\\OneDrive\\\\바탕 화면\\\\stayfit_temp\"; $dst = \"c:\\\\Users\\\\user\\\\OneDrive\\\\바탕 화면\\\\stayfit\"; Get-ChildItem -Path $src -Force | ForEach-Object { Move-Item -Path $_.FullName -Destination $dst -Force }; Write-Output \"Done moving files\")",
+      "Read(//c/Users/user/OneDrive/바탕 화면/stayfit_temp/**)",
+      "Bash(rm -rf \"c:/Users/user/OneDrive/바탕 화면/stayfit_temp\")"
+    ],
+    "additionalDirectories": [
+      "c:\\Users\\user\\OneDrive\\바탕 화면\\stayfit_temp"
+    ]
   }
 }
