@@ -1,11 +1,13 @@
 import React from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, FlatList,
+  TouchableOpacity, FlatList, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { colors, radius, spacing } from '@/constants/tokens';
+import { useUserFinance } from '@/hooks/useUserFinance';
+import { useMyInfo } from '@/hooks/useUser';
 
 const RECOMMENDED = [
   { id: '1', name: '래미안 퍼스티지', location: '서초구 반포동', price: '13억 5,000', type: '매매', dsr: 37.5, suitable: true },
@@ -19,6 +21,49 @@ const RECENT = [
 ];
 
 export default function HomeScreen() {
+  // API 호출: 사용자 정보 조회
+  const { data: userInfo, isLoading: userLoading, error: userError } = useMyInfo();
+
+  // 디버깅 로그
+  console.log('👤 사용자 정보:', userInfo);
+  console.log('👤 로딩 상태:', userLoading);
+  console.log('👤 에러:', userError);
+
+  // API 호출: 재무 정보 조회
+  const { data: financeData, isLoading: financeLoading } = useUserFinance();
+
+  // 재무 데이터 포맷팅
+  const formatIncome = (income?: number) => {
+    if (!income) return '미입력';
+    return `${Math.floor(income / 10000)}만원`;
+  };
+
+  const formatAsset = (asset?: number) => {
+    if (!asset) return '0';
+    const eok = Math.floor(asset / 100000000);
+    const man = Math.floor((asset % 100000000) / 10000);
+    if (eok > 0 && man > 0) return `${eok}억 ${man}만`;
+    if (eok > 0) return `${eok}억`;
+    return `${man}만`;
+  };
+
+  // 간단한 점수 계산 (임시)
+  const calculateScore = () => {
+    if (!financeData) return 0;
+    const income = financeData.annual_income || 0;
+    const asset = financeData.capital || 0;
+    const debt = financeData.total_debt_amount || 0;
+
+    // 간단한 로직: 자산이 많고 부채가 적으면 높은 점수
+    const assetScore = Math.min((asset / 100000000) * 30, 50); // 최대 50점
+    const incomeScore = Math.min((income / 50000000) * 30, 30); // 최대 30점
+    const debtPenalty = Math.min((debt / asset) * 20, 20); // 최대 -20점
+
+    return Math.round(assetScore + incomeScore - debtPenalty + 20);
+  };
+
+  const score = calculateScore();
+
   return (
     <View style={styles.root}>
       <ScrollView showsVerticalScrollIndicator={false}>
@@ -28,7 +73,9 @@ export default function HomeScreen() {
             <View style={styles.headerTop}>
               <View>
                 <Text style={styles.greet}>좋은 아침이에요 ☀️</Text>
-                <Text style={styles.headerName}>박수민님의 재무 체력</Text>
+                <Text style={styles.headerName}>
+                  {userInfo?.nickname || userInfo?.username || '사용자'}님의 재무 체력
+                </Text>
               </View>
               <TouchableOpacity style={styles.bellBtn}>
                 <Text style={{ fontSize: 20 }}>🔔</Text>
@@ -40,33 +87,44 @@ export default function HomeScreen() {
 
         <View style={styles.body}>
           {/* Financial Fitness Card */}
-          <View style={styles.fitnessCard}>
-            <View style={styles.fitnessTop}>
-              <Text style={styles.fitnessLabel}>재무 체력 점수</Text>
-              <View style={styles.fitnessBadge}>
-                <Text style={styles.fitnessBadgeText}>양호</Text>
+          {financeLoading ? (
+            <View style={styles.fitnessCard}>
+              <ActivityIndicator size="large" color={colors.navy} />
+              <Text style={styles.loadingText}>재무 정보 불러오는 중...</Text>
+            </View>
+          ) : (
+            <View style={styles.fitnessCard}>
+              <View style={styles.fitnessTop}>
+                <Text style={styles.fitnessLabel}>재무 체력 점수</Text>
+                <View style={styles.fitnessBadge}>
+                  <Text style={styles.fitnessBadgeText}>
+                    {score >= 70 ? '양호' : score >= 50 ? '보통' : '주의'}
+                  </Text>
+                </View>
+              </View>
+              <View style={styles.scoreRow}>
+                <Text style={styles.score}>{score}</Text>
+                <Text style={styles.scoreTotal}> / 100</Text>
+              </View>
+              <View style={styles.progressBg}>
+                <View style={[styles.progressFill, { width: `${score}%` }]} />
+              </View>
+              <View style={styles.statsRow}>
+                <View style={styles.statItem}>
+                  <Text style={styles.statVal}>{formatIncome(financeData?.annual_income)}</Text>
+                  <Text style={styles.statLbl}>연소득</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statVal}>{formatAsset(financeData?.capital)}</Text>
+                  <Text style={styles.statLbl}>보유자산</Text>
+                </View>
+                <View style={styles.statItem}>
+                  <Text style={styles.statVal}>{formatAsset(financeData?.total_debt_amount)}</Text>
+                  <Text style={styles.statLbl}>부채</Text>
+                </View>
               </View>
             </View>
-            <View style={styles.scoreRow}>
-              <Text style={styles.score}>72</Text>
-              <Text style={styles.scoreTotal}> / 100</Text>
-            </View>
-            <View style={styles.progressBg}>
-              <View style={[styles.progressFill, { width: '72%' }]} />
-            </View>
-            <View style={styles.statsRow}>
-              {[
-                { v: '350만', l: '연소득' },
-                { v: '47%', l: 'LTV' },
-                { v: '28%', l: 'DSR' },
-              ].map((s) => (
-                <View key={s.l} style={styles.statItem}>
-                  <Text style={styles.statVal}>{s.v}</Text>
-                  <Text style={styles.statLbl}>{s.l}</Text>
-                </View>
-              ))}
-            </View>
-          </View>
+          )}
 
           {/* AI Banner */}
           <TouchableOpacity
@@ -132,7 +190,11 @@ export default function HomeScreen() {
 
 function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
   return (
-    <View style={styles.propCard}>
+    <TouchableOpacity
+      style={styles.propCard}
+      activeOpacity={0.85}
+      onPress={() => router.push(`/property/${item.id}`)}
+    >
       <View style={styles.propImg}>
         <View style={styles.propTag}>
           <Text style={styles.propTagText}>{item.type}</Text>
@@ -153,7 +215,7 @@ function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
         <Text style={styles.propPrice}>{item.price}</Text>
         <Text style={styles.propDsr}>DSR {item.dsr}%</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 }
 
@@ -218,6 +280,7 @@ const styles = StyleSheet.create({
   },
   statVal: { fontSize: 14, fontWeight: '800', color: colors.navy, marginBottom: 2, letterSpacing: -0.3 },
   statLbl: { fontSize: 10, color: colors.muted },
+  loadingText: { fontSize: 13, color: colors.muted, marginTop: 12, textAlign: 'center' },
 
   aiBanner: {
     backgroundColor: colors.navy,

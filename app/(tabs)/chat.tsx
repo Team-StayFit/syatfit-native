@@ -1,77 +1,246 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, FlatList,
+  View, Text, StyleSheet, ScrollView,
   TouchableOpacity, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Markdown from 'react-native-markdown-display';
 import { colors, radius, spacing } from '@/constants/tokens';
-
-interface LLMResponse {
-  financial_summary: { budget: number; ltv: number; dsr: number };
-  properties: Array<{
-    id: string; name: string; location: string;
-    price: string; type: string; dsr: number; suitable: boolean;
-  }>;
-  loans: Array<{
-    id: string; name: string; bank: string;
-    rate: string; ltv_limit: number; max_amount: string;
-  }>;
-  reason: string;
-}
+import { streamRecommendation, streamChatMessage } from '@/lib/api/aiClient';
+import { useUserFinance } from '@/hooks/useUserFinance';
 
 type ChatState = 'empty' | 'streaming' | 'done';
 
-const SUGGESTIONS = [
-  '마포구 역세권 아파트 추천해줘',
-  '전세 4억 이하 경기도 어때?',
-  '매매 vs 전세 뭐가 유리해?',
-];
-
-const MOCK_RESPONSE: LLMResponse = {
-  financial_summary: { budget: 51419, ltv: 70, dsr: 40 },
-  properties: [
-    { id: '1', name: '합정역 한강아파트', location: '마포구 합정동', price: '4억 2,000', type: '매매', dsr: 37.5, suitable: true },
-    { id: '2', name: '망원동 나미엘', location: '마포구 망원동', price: '4억 9,000', type: '매매', dsr: 40.0, suitable: true },
-    { id: '3', name: '상암 DMC 오피스텔', location: '마포구 상암동', price: '2억 8,000', type: '오피스텔', dsr: 35.2, suitable: true },
-  ],
-  loans: [
-    { id: '1', name: '우리 아파트론', bank: '우리은행', rate: '3.5~4.2%', ltv_limit: 70, max_amount: '최대 5억' },
-    { id: '2', name: '하나 청년 주택드림대출', bank: '하나은행', rate: '2.7~3.3%', ltv_limit: 80, max_amount: '최대 3억' },
-  ],
-  reason: '합정역 한강아파트가 학교·역세권·마트 접근성을 모두 만족해요. 망원동 나미엘은 평가 조망이 추가 장점이지만 DSR이 한도에 근접해요.',
+type Message = {
+  id: string;
+  type: 'user' | 'ai';
+  content: string;
+  isStreaming?: boolean;
 };
 
-const STREAM_PREFIX = `연 소득 6,000만원, 자산 2억, 부채 5,000만원 기준으로 분석한 거예요.\n\nDSR 40% 한도 내 최대 대출 3억 1,419만원, 실질 구매 가능 예산은 약 5억 1,419만원이에요.\n\n마포구 역세권 조건으로 매물 검색 중이에요...`;
+const SUGGESTIONS = [
+  '마포구 역세권 아파트 추천해줘', // 매물 추천
+  'DSR이 뭐야?', // 일반 채팅
+  '전세 4억 이하 경기도 어때?', // 매물 추천
+];
+
+// MOCK 데이터 (향후 필요시 사용)
+// const MOCK_RESPONSE: LLMResponse = { ... };
 
 export default function ChatScreen() {
   const insets = useSafeAreaInsets();
   const [chatState, setChatState] = useState<ChatState>('empty');
-  const [userQuery, setUserQuery] = useState('');
+  const [messages, setMessages] = useState<Message[]>([]);
   const [streamText, setStreamText] = useState('');
-  const [llmData, setLlmData] = useState<LLMResponse | null>(null);
-  const streamTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scrollRef = useRef<ScrollView>(null);
 
-  const handleSend = (query: string) => {
+  // 재무 정보 가져오기
+  const { data: financeData } = useUserFinance();
+
+  // 스크롤을 맨 아래로 이동
+  useEffect(() => {
+    if (chatState !== 'empty') {
+      scrollRef.current?.scrollToEnd({ animated: true });
+    }
+  }, [streamText, chatState]);
+
+  // 질문 유형 자동 감지
+  const detectQueryType = (query: string): 'recommendation' | 'chat' => {
+    const lowerQuery = query.toLowerCase();
+
+    // 1. 질문형 키워드 우선 체크 (질문이면 일반 채팅)
+    const questionKeywords = [
+      '뭐야', '뭐', '무엇', '설명', '알려줘', '알려주',
+      '어떻게', '왜', '이란', '뜻', '의미', '정의',
+      '?', '??',
+    ];
+    const hasQuestionKeyword = questionKeywords.some(keyword =>
+      lowerQuery.includes(keyword)
+    );
+
+    if (hasQuestionKeyword) {
+      console.log('  → 질문형 키워드 감지, 일반 채팅으로 처리');
+      return 'chat';
+    }
+
+    // 2. 부동산 매물 추천 키워드 체크 (더 정교하게)
+    // 핵심 부동산 키워드 (이것들이 있어야 매물 추천으로 판단)
+    const propertyKeywords = [
+      '매물', '아파트', '집', '주택', '오피스텔', '빌라',
+      '전세', '월세', '매매', '분양', '청약',
+      '역세권', '학군', '신축', '평', '억', '만원',
+      '부동산', '주거', '거주', '입주',
+    ];
+
+    // 보조 키워드 (부동산 키워드와 함께 있을 때만 의미 있음)
+    const actionKeywords = ['추천', '구해', '찾아', '알아봐', '보여', '검색'];
+
+    const hasPropertyKeyword = propertyKeywords.some(keyword =>
+      lowerQuery.includes(keyword)
+    );
+
+    const hasActionKeyword = actionKeywords.some(keyword =>
+      lowerQuery.includes(keyword)
+    );
+
+    // 부동산 키워드가 있거나, 부동산 키워드 + 액션 키워드 조합일 때만 추천
+    if (hasPropertyKeyword) {
+      console.log('  → 부동산 키워드 감지, 매물 추천으로 처리');
+      return 'recommendation';
+    }
+
+    // 3. 기본값: 일반 채팅
+    console.log('  → 기본값: 일반 채팅');
+    return 'chat';
+  };
+
+  const handleSend = async (query: string) => {
     if (!query.trim()) return;
-    setUserQuery(query);
+
+    // 사용자 메시지 추가
+    const userMessage: Message = {
+      id: Date.now().toString(),
+      type: 'user',
+      content: query,
+    };
+
+    // AI 메시지 placeholder 추가
+    const aiMessage: Message = {
+      id: (Date.now() + 1).toString(),
+      type: 'ai',
+      content: '',
+      isStreaming: true,
+    };
+
+    setMessages((prev) => [...prev, userMessage, aiMessage]);
     setChatState('streaming');
     setStreamText('');
-    setLlmData(null);
 
-    let idx = 0;
-    const tick = () => {
-      idx++;
-      setStreamText(STREAM_PREFIX.slice(0, idx));
-      if (idx < STREAM_PREFIX.length) {
-        streamTimer.current = setTimeout(tick, 18);
+    const queryType = detectQueryType(query);
+    console.log('🔍 질문 유형:', queryType);
+
+    try {
+      if (queryType === 'recommendation') {
+        // 매물 추천 API
+        const annualIncome = financeData?.annual_income || 60000000;
+        const assets = financeData?.capital || 200000000;
+        const debt = financeData?.total_debt_amount || 50000000;
+        const isHomeOwner = financeData?.is_home_owner || false;
+
+        const requestData = {
+          annual_income_man_won: Math.floor(annualIncome / 10000),
+          assets_man_won: Math.floor(assets / 10000),
+          existing_debt_man_won: Math.floor(debt / 10000),
+          existing_annual_repayment_man_won: 0,
+          is_home_owner: isHomeOwner,
+          lifestyle_keywords: query,
+          loan_rate_pct: 4,
+          loan_term_years: 30,
+          occupation: '일반',
+          preferences: {
+            transaction_type: 'TRADING',
+            property_type: 'APT',
+            parking_required: true,
+          },
+          preferred_area: '마포구',
+          top_k: 5,
+        };
+
+        console.log('🏠 매물 추천 API 호출');
+
+        await streamRecommendation(
+          requestData,
+          (chunk) => {
+            setStreamText((prev) => {
+              // \x00 마커는 전체 교체를 의미
+              const newText = chunk.startsWith('\x00') ? chunk.substring(1) : prev + chunk;
+              // 메시지 배열도 동시에 업데이트
+              setMessages((msgs) =>
+                msgs.map((msg) =>
+                  msg.id === aiMessage.id ? { ...msg, content: newText } : msg
+                )
+              );
+              return newText;
+            });
+          },
+          () => {
+            setChatState('done');
+            // AI 메시지 스트리밍 완료
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessage.id ? { ...msg, isStreaming: false } : msg
+              )
+            );
+          },
+          (error) => {
+            console.error('AI stream error:', error);
+            const errorMsg = '죄송합니다. 응답을 생성하는 중 오류가 발생했습니다.';
+            setStreamText(errorMsg);
+            setChatState('done');
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessage.id
+                  ? { ...msg, content: errorMsg, isStreaming: false }
+                  : msg
+              )
+            );
+          }
+        );
       } else {
-        setTimeout(() => {
-          setLlmData(MOCK_RESPONSE);
-          setChatState('done');
-        }, 600);
+        // 일반 채팅 API
+        console.log('💬 일반 채팅 API 호출');
+
+        await streamChatMessage(
+          query,
+          (chunk) => {
+            setStreamText((prev) => {
+              const newText = prev + chunk;
+              // 메시지 배열도 동시에 업데이트
+              setMessages((msgs) =>
+                msgs.map((msg) =>
+                  msg.id === aiMessage.id ? { ...msg, content: newText } : msg
+                )
+              );
+              return newText;
+            });
+          },
+          () => {
+            setChatState('done');
+            // AI 메시지 스트리밍 완료
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessage.id ? { ...msg, isStreaming: false } : msg
+              )
+            );
+          },
+          (error) => {
+            console.error('AI stream error:', error);
+            const errorMsg = '죄송합니다. 응답을 생성하는 중 오류가 발생했습니다.';
+            setStreamText(errorMsg);
+            setChatState('done');
+            setMessages((prev) =>
+              prev.map((msg) =>
+                msg.id === aiMessage.id
+                  ? { ...msg, content: errorMsg, isStreaming: false }
+                  : msg
+              )
+            );
+          }
+        );
       }
-    };
-    tick();
+    } catch (error) {
+      console.error('Failed to start stream:', error);
+      const errorMsg = '죄송합니다. 서버에 연결할 수 없습니다.';
+      setStreamText(errorMsg);
+      setChatState('done');
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === aiMessage.id
+            ? { ...msg, content: errorMsg, isStreaming: false }
+            : msg
+        )
+      );
+    }
   };
 
   return (
@@ -92,43 +261,51 @@ export default function ChatScreen() {
 
       {/* Body */}
       <ScrollView
+        ref={scrollRef}
         style={styles.body}
-        contentContainerStyle={chatState === 'empty' ? styles.emptyContent : styles.chatContent}
+        contentContainerStyle={messages.length === 0 ? styles.emptyContent : styles.chatContent}
         showsVerticalScrollIndicator={false}
       >
-        {chatState === 'empty' && <EmptyState onSelect={handleSend} />}
+        {messages.length === 0 && <EmptyState onSelect={handleSend} />}
 
-        {(chatState === 'streaming' || chatState === 'done') && (
-          <>
-            {/* User bubble */}
-            <View style={styles.userBubbleRow}>
-              <View style={styles.userBubble}>
-                <Text style={styles.userBubbleText}>{userQuery}</Text>
-              </View>
-            </View>
-
-            {/* AI bubble */}
-            <View style={styles.aiBubbleRow}>
-              <View style={styles.aiAvatar}>
-                <Text style={{ fontSize: 14 }}>✦</Text>
-              </View>
-              <View style={styles.aiContent}>
-                <Text style={styles.aiName}>STAYFIT AI</Text>
-                <View style={styles.aiBubble}>
-                  <Text style={styles.aiText}>
-                    {chatState === 'streaming' ? streamText : STREAM_PREFIX}
-                    {chatState === 'streaming' && (
-                      <Text style={styles.cursor}>|</Text>
-                    )}
-                  </Text>
-                  {chatState === 'done' && llmData && (
-                    <LLMResultCards data={llmData} />
-                  )}
+        {messages.map((message) => {
+          if (message.type === 'user') {
+            return (
+              <View key={message.id} style={styles.userBubbleRow}>
+                <View style={styles.userBubble}>
+                  <Text style={styles.userBubbleText}>{message.content}</Text>
                 </View>
               </View>
-            </View>
-          </>
-        )}
+            );
+          } else {
+            // AI message
+            const displayText = message.isStreaming ? streamText : message.content;
+            return (
+              <View key={message.id} style={styles.aiBubbleRow}>
+                <View style={styles.aiAvatar}>
+                  <Text style={{ fontSize: 14 }}>✦</Text>
+                </View>
+                <View style={styles.aiContent}>
+                  <Text style={styles.aiName}>STAYFIT AI</Text>
+                  <View style={styles.aiBubble}>
+                    {displayText ? (
+                      <>
+                        <Markdown style={markdownStyles}>
+                          {displayText}
+                        </Markdown>
+                        {message.isStreaming && (
+                          <Text style={styles.cursor}>|</Text>
+                        )}
+                      </>
+                    ) : (
+                      <Text style={styles.aiText}>응답을 생성하고 있습니다...</Text>
+                    )}
+                  </View>
+                </View>
+              </View>
+            );
+          }
+        })}
       </ScrollView>
 
       {/* Input bar */}
@@ -168,83 +345,8 @@ function EmptyState({ onSelect }: { onSelect: (q: string) => void }) {
   );
 }
 
-function LLMResultCards({ data }: { data: LLMResponse }) {
-  const { financial_summary, properties, loans, reason } = data;
-
-  return (
-    <View style={styles.resultWrap}>
-      {/* 재무 요약 칩 */}
-      <View style={styles.chipRow}>
-        <View style={styles.chipItem}>
-          <Text style={[styles.chipVal, { color: colors.mintText }]}>
-            {(financial_summary.budget / 10000).toFixed(2)}억
-          </Text>
-          <Text style={styles.chipLbl}>구매 예산</Text>
-        </View>
-        <View style={styles.chipItem}>
-          <Text style={styles.chipVal}>LTV {financial_summary.ltv}%</Text>
-          <Text style={styles.chipLbl}>대출 한도</Text>
-        </View>
-        <View style={styles.chipItem}>
-          <Text style={[styles.chipVal, { color: colors.warn }]}>
-            DSR {financial_summary.dsr}%
-          </Text>
-          <Text style={styles.chipLbl}>상환 한도</Text>
-        </View>
-      </View>
-
-      {/* 추천 매물 */}
-      <Text style={styles.resultSect}>추천 매물</Text>
-      <FlatList
-        horizontal
-        data={properties}
-        keyExtractor={(i) => i.id}
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.propScroll}
-        scrollEnabled
-        renderItem={({ item }) => (
-          <View style={styles.miniPropCard}>
-            <View style={[styles.miniPropImg, { backgroundColor: '#D0DBE8' }]}>
-              <View style={styles.miniTag}>
-                <Text style={styles.miniTagText}>{item.type}</Text>
-              </View>
-              <View style={styles.miniFit}>
-                <Text style={styles.miniFitText}>✓ 적합</Text>
-              </View>
-            </View>
-            <View style={styles.miniPropBody}>
-              <Text style={styles.miniPropName}>{item.name}</Text>
-              <Text style={styles.miniPropLoc}>{item.location}</Text>
-              <Text style={styles.miniPropPrice}>{item.price}</Text>
-              <Text style={styles.miniDsr}>DSR {item.dsr}%</Text>
-            </View>
-          </View>
-        )}
-      />
-
-      {/* 추천 대출 */}
-      <Text style={styles.resultSect}>추천 대출 상품</Text>
-      {loans.map((l) => (
-        <View key={l.id} style={styles.loanCard}>
-          <View style={{ flex: 1 }}>
-            <Text style={styles.loanName}>{l.name}</Text>
-            <Text style={styles.loanType}>{l.bank} · LTV {l.ltv_limit}%</Text>
-          </View>
-          <View style={{ alignItems: 'flex-end' }}>
-            <Text style={styles.loanRate}>{l.rate}</Text>
-            <Text style={styles.loanMax}>{l.max_amount}</Text>
-          </View>
-        </View>
-      ))}
-
-      {/* 추천 이유 */}
-      <View style={styles.reasonBox}>
-        <Text style={styles.reasonText}>{reason}</Text>
-        <Text style={styles.reasonMore}>매물 상세 비교 보기 →</Text>
-      </View>
-    </View>
-  );
-}
+// LLMResultCards 컴포넌트는 향후 구조화된 응답 처리 시 사용
+// function LLMResultCards({ data }: { data: LLMResponse }) { ... }
 
 function InputBar({
   disabled, onSend, insets,
@@ -431,4 +533,79 @@ const styles = StyleSheet.create({
   },
   sendBtnOff: { backgroundColor: '#E2DED6' },
   sendArrow: { fontSize: 16, color: colors.white, fontWeight: '700' },
+});
+
+// 마크다운 스타일
+const markdownStyles = StyleSheet.create({
+  body: {
+    fontSize: 13,
+    color: colors.navy,
+    lineHeight: 21,
+  },
+  heading1: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: colors.navy,
+    marginTop: 8,
+    marginBottom: 6,
+  },
+  heading2: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.navy,
+    marginTop: 7,
+    marginBottom: 5,
+  },
+  heading3: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.navy,
+    marginTop: 6,
+    marginBottom: 4,
+  },
+  paragraph: {
+    fontSize: 13,
+    color: colors.navy,
+    lineHeight: 21,
+    marginTop: 2,
+    marginBottom: 2,
+  },
+  listItem: {
+    fontSize: 13,
+    color: colors.navy,
+    lineHeight: 21,
+    marginBottom: 3,
+  },
+  strong: {
+    fontWeight: '700',
+    color: colors.navy,
+  },
+  em: {
+    fontStyle: 'italic',
+  },
+  code_inline: {
+    backgroundColor: '#F5F5F5',
+    color: colors.mintText,
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    borderRadius: 3,
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  fence: {
+    backgroundColor: '#F5F5F5',
+    padding: 10,
+    borderRadius: 8,
+    marginVertical: 6,
+  },
+  code_block: {
+    fontSize: 12,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    color: colors.navy,
+  },
+  hr: {
+    backgroundColor: colors.border,
+    height: 1,
+    marginVertical: 10,
+  },
 });

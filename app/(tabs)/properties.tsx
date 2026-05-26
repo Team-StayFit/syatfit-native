@@ -1,57 +1,62 @@
 import React, { useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList,
-  TouchableOpacity,
+  TouchableOpacity, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { colors, radius, spacing } from '@/constants/tokens';
+import { usePropertySearch } from '@/hooks/useProperty';
 
 type ViewMode = 'list' | 'map';
-type FilterType = '전체' | '매매' | '전세' | '오피스텔';
+type FilterType = '전체' | 'TRADING' | 'LEASE';
 
-const PROPERTIES = [
-  {
-    id: '1', name: '래미안 퍼스티지', location: '서초구 반포동',
-    price: '13억 5,000', priceLabel: '매매가', type: '매매',
-    dsr: 37.5, ltv: 47, suitable: true, area: '84㎡', floor: '12층',
-  },
-  {
-    id: '2', name: '파크스테이트 광교', location: '수원시 영통구',
-    price: '4억 8,000', priceLabel: '전세가', type: '전세',
-    dsr: 35.2, ltv: 40, suitable: true, area: '59㎡', floor: '7층',
-  },
-  {
-    id: '3', name: '합정역 한강아파트', location: '마포구 합정동',
-    price: '4억 2,000', priceLabel: '매매가', type: '매매',
-    dsr: 38.1, ltv: 55, suitable: true, area: '49㎡', floor: '3층',
-  },
-  {
-    id: '4', name: '아크로 서울포레스트', location: '성동구 성수동',
-    price: '18억 2,000', priceLabel: '매매가', type: '매매',
-    dsr: 41.2, ltv: 60, suitable: false, area: '115㎡', floor: '25층',
-  },
-  {
-    id: '5', name: '브라이튼 여의도', location: '영등포구 여의도동',
-    price: '3억 2,000', priceLabel: '전세가', type: '전세',
-    dsr: 29.8, ltv: 35, suitable: true, area: '33㎡', floor: '18층',
-  },
-  {
-    id: '6', name: '상암 DMC 오피스텔', location: '마포구 상암동',
-    price: '2억 8,000', priceLabel: '매매가', type: '오피스텔',
-    dsr: 35.2, ltv: 45, suitable: true, area: '27㎡', floor: '9층',
-  },
+const FILTERS: { label: string; value: FilterType }[] = [
+  { label: '전체', value: '전체' },
+  { label: '매매', value: 'TRADING' },
+  { label: '전세', value: 'LEASE' },
 ];
-
-const FILTERS: FilterType[] = ['전체', '매매', '전세', '오피스텔'];
 
 export default function PropertyListScreen() {
   const insets = useSafeAreaInsets();
   const [viewMode, setViewMode] = useState<ViewMode>('list');
   const [activeFilter, setActiveFilter] = useState<FilterType>('전체');
 
-  const filtered = activeFilter === '전체'
-    ? PROPERTIES
-    : PROPERTIES.filter((p) => p.type === activeFilter);
+  // API 호출: 마포구 매물 검색
+  const { data, isLoading, error } = usePropertySearch({
+    sgg_name: '마포구',
+    transaction_type: activeFilter === '전체' ? undefined : activeFilter,
+  });
+
+  // 거래 정보가 있는 매물만 필터링 (price나 type이 null인 매물 제외)
+  const properties = (data?.properties || []).filter(p =>
+    p.transactionType && (p.price !== null || p.monthlyRent !== null)
+  );
+  const totalCount = data?.totalCount || 0;
+
+  console.log('🏠 전체 매물:', data?.properties?.length || 0);
+  console.log('🏠 표시 가능한 매물:', properties.length);
+
+  // 월세 매물 확인
+  const rentProperties = properties.filter(p => p.transactionType === 'RENT');
+  console.log('🏠 월세 매물 개수:', rentProperties.length);
+  if (rentProperties.length > 0) {
+    console.log('🏠 월세 매물 샘플 (처음 3개):', rentProperties.slice(0, 3).map(p => ({
+      name: p.name,
+      보증금: p.price,
+      월세: p.monthlyRent,
+    })));
+  }
+
+  // 전세 매물 확인
+  const leaseProperties = properties.filter(p => p.transactionType === 'LEASE');
+  console.log('🏠 전세 매물 개수:', leaseProperties.length);
+  if (leaseProperties.length > 0) {
+    console.log('🏠 전세 매물 샘플 (처음 5개):', leaseProperties.slice(0, 5).map(p => ({
+      name: p.name,
+      전세금: p.price,
+    })));
+  }
 
   return (
     <View style={styles.root}>
@@ -82,13 +87,13 @@ export default function PropertyListScreen() {
       <View style={styles.filterRow}>
         {FILTERS.map((f) => (
           <TouchableOpacity
-            key={f}
-            style={[styles.filterChip, activeFilter === f && styles.filterChipOn]}
-            onPress={() => setActiveFilter(f)}
+            key={f.value}
+            style={[styles.filterChip, activeFilter === f.value && styles.filterChipOn]}
+            onPress={() => setActiveFilter(f.value)}
             activeOpacity={0.75}
           >
-            <Text style={[styles.filterText, activeFilter === f && styles.filterTextOn]}>
-              {f}
+            <Text style={[styles.filterText, activeFilter === f.value && styles.filterTextOn]}>
+              {f.label}
             </Text>
           </TouchableOpacity>
         ))}
@@ -101,18 +106,34 @@ export default function PropertyListScreen() {
       {/* Result count */}
       <View style={styles.countRow}>
         <Text style={styles.countText}>
-          총 <Text style={styles.countNum}>{filtered.length}</Text>개
+          총 <Text style={styles.countNum}>{totalCount}</Text>개
         </Text>
-        <Text style={styles.countSub}>재무 체력 기반 필터 적용</Text>
+        <Text style={styles.countSub}>마포구 매물</Text>
       </View>
 
-      {viewMode === 'list' ? (
+      {/* Loading / Error / Content */}
+      {isLoading ? (
+        <View style={styles.centerContainer}>
+          <ActivityIndicator size="large" color={colors.navy} />
+          <Text style={styles.loadingText}>매물을 불러오는 중...</Text>
+        </View>
+      ) : error ? (
+        <View style={styles.centerContainer}>
+          <Text style={styles.errorText}>❌ 매물을 불러올 수 없습니다</Text>
+          <Text style={styles.errorSubText}>{(error as Error).message}</Text>
+        </View>
+      ) : viewMode === 'list' ? (
         <FlatList
-          data={filtered}
-          keyExtractor={(i) => i.id}
+          data={properties}
+          keyExtractor={(item, index) => item.propertyId ? String(item.propertyId) : `property-${index}`}
           contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => <PropertyRow item={item} />}
+          ListEmptyComponent={
+            <View style={styles.centerContainer}>
+              <Text style={styles.emptyText}>🏠 매물이 없습니다</Text>
+            </View>
+          }
         />
       ) : (
         <MapPlaceholder />
@@ -121,38 +142,71 @@ export default function PropertyListScreen() {
   );
 }
 
-function PropertyRow({ item }: { item: typeof PROPERTIES[0] }) {
+function PropertyRow({ item }: { item: any }) {
+  // 가격 포맷팅: 만원 단위 → 억/만원 표시
+  const formatPrice = (priceManWon: number) => {
+    if (!priceManWon || priceManWon === 0) return '0';
+    const eok = Math.floor(priceManWon / 10000); // 만원 → 억
+    const man = priceManWon % 10000; // 나머지 만원
+    if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만`;
+    if (eok > 0) return `${eok}억`;
+    return `${man.toLocaleString()}만`;
+  };
+
+  // 거래 유형에 따른 가격 표시
+  const getPriceDisplay = () => {
+    if (item.transactionType === 'RENT') {
+      // 월세: 보증금 있으면 "보증금 / 월세", 없으면 "월세"만
+      const monthly = formatPrice(item.monthlyRent);
+      if (item.price && item.price > 0) {
+        const deposit = formatPrice(item.price);
+        return `${deposit} / 월 ${monthly}`;
+      }
+      return `월세 ${monthly}`;
+    } else if (item.transactionType === 'LEASE') {
+      // 전세: 전세금만
+      return `전세 ${formatPrice(item.price)}`;
+    } else {
+      // 매매: 매매가만
+      return `매매 ${formatPrice(item.price)}`;
+    }
+  };
+
+  // 거래 유형 한글 변환
+  const getTypeLabel = (type: string) => {
+    if (type === 'TRADING') return '매매';
+    if (type === 'LEASE') return '전세';
+    if (type === 'RENT') return '월세';
+    return type;
+  };
+
   return (
-    <TouchableOpacity style={styles.propRow} activeOpacity={0.85}>
+    <TouchableOpacity
+      style={styles.propRow}
+      activeOpacity={0.85}
+      onPress={() => router.push(`/property/${item.propertyId}`)}
+    >
       <View style={styles.propThumb}>
         <View style={styles.propTypeTag}>
-          <Text style={styles.propTypeText}>{item.type}</Text>
+          <Text style={styles.propTypeText}>{getTypeLabel(item.transactionType)}</Text>
         </View>
       </View>
       <View style={styles.propInfo}>
         <View style={styles.propTopRow}>
           <Text style={styles.propName}>{item.name}</Text>
-          {item.suitable ? (
-            <View style={styles.suitBadge}>
-              <Text style={styles.suitText}>✓ 적합</Text>
-            </View>
-          ) : (
-            <View style={[styles.suitBadge, { backgroundColor: '#FFF0EB' }]}>
-              <Text style={[styles.suitText, { color: colors.warn }]}>DSR 주의</Text>
-            </View>
-          )}
         </View>
-        <Text style={styles.propLoc}>{item.location} · {item.area} · {item.floor}</Text>
-        <Text style={styles.propPrice}>{item.price}</Text>
+        <Text style={styles.propLoc}>
+          {item.roadAddress} · {item.exclusiveArea?.toFixed(0)}㎡
+        </Text>
+        <Text style={styles.propPrice}>{getPriceDisplay()}</Text>
         <View style={styles.propMeta}>
-          <Text style={styles.propMetaText}>LTV {item.ltv}%</Text>
-          <View style={styles.metaDot} />
-          <Text style={[
-            styles.propMetaText,
-            { color: item.dsr >= 40 ? colors.warn : colors.mint },
-          ]}>
-            DSR {item.dsr}%
-          </Text>
+          <Text style={styles.propMetaText}>주차 {item.parkingRatio?.toFixed(0)}%</Text>
+          {item.constructor && (
+            <>
+              <View style={styles.metaDot} />
+              <Text style={styles.propMetaText}>{item.constructor}</Text>
+            </>
+          )}
         </View>
       </View>
     </TouchableOpacity>
@@ -257,4 +311,32 @@ const styles = StyleSheet.create({
   mapBox: { alignItems: 'center' },
   mapTitle: { fontSize: 15, fontWeight: '700', color: colors.navy, marginBottom: 4 },
   mapDesc: { fontSize: 13, color: colors.muted },
+
+  // Loading / Error / Empty states
+  centerContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: spacing.xl,
+  },
+  loadingText: {
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: 12,
+  },
+  errorText: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: colors.navy,
+    marginBottom: 6,
+  },
+  errorSubText: {
+    fontSize: 12,
+    color: colors.muted,
+    textAlign: 'center',
+  },
+  emptyText: {
+    fontSize: 15,
+    color: colors.muted,
+  },
 });
