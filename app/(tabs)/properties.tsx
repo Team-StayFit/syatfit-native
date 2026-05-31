@@ -7,6 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { usePropertySearch } from '@/hooks/useProperty';
+import { useCheckFavorite, useToggleFavorite } from '@/hooks/useFavorite';
 
 type ViewMode = 'list' | 'map';
 type FilterType = '전체' | 'TRADING' | 'LEASE';
@@ -143,6 +144,10 @@ export default function PropertyListScreen() {
 }
 
 function PropertyRow({ item }: { item: any }) {
+  // 찜 상태 조회 및 토글
+  const { data: isFavorite = false } = useCheckFavorite(item.propertyId);
+  const { mutate: toggleFavorite, isPending: isTogglingFavorite } = useToggleFavorite();
+
   // 가격 포맷팅: 만원 단위 → 억/만원 표시
   const formatPrice = (priceManWon: number) => {
     if (!priceManWon || priceManWon === 0) return '0';
@@ -180,6 +185,21 @@ function PropertyRow({ item }: { item: any }) {
     return type;
   };
 
+  // 찜 토글 핸들러
+  const handleToggleFavorite = (e: any) => {
+    e.stopPropagation(); // 카드 클릭 방지
+    if (isTogglingFavorite) return;
+
+    toggleFavorite(
+      { propertyId: Number(item.propertyId), isFavorite },
+      {
+        onError: (error) => {
+          console.error('찜 토글 실패:', error);
+        },
+      }
+    );
+  };
+
   return (
     <TouchableOpacity
       style={styles.propRow}
@@ -194,6 +214,16 @@ function PropertyRow({ item }: { item: any }) {
       <View style={styles.propInfo}>
         <View style={styles.propTopRow}>
           <Text style={styles.propName}>{item.name}</Text>
+          <TouchableOpacity
+            onPress={handleToggleFavorite}
+            disabled={isTogglingFavorite}
+            style={styles.favoriteBtn}
+            activeOpacity={0.7}
+          >
+            <Text style={styles.favoriteIcon}>
+              {isTogglingFavorite ? '⏳' : isFavorite ? '❤️' : '🤍'}
+            </Text>
+          </TouchableOpacity>
         </View>
         <Text style={styles.propLoc}>
           {item.roadAddress} · {item.exclusiveArea?.toFixed(0)}㎡
@@ -296,6 +326,8 @@ const styles = StyleSheet.create({
   propInfo: { flex: 1, padding: 12 },
   propTopRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 3 },
   propName: { fontSize: 13, fontWeight: '700', color: colors.navy, letterSpacing: -0.2, flex: 1 },
+  favoriteBtn: { marginLeft: 8 },
+  favoriteIcon: { fontSize: 16 },
   suitBadge: {
     backgroundColor: colors.mintLight, borderRadius: 5,
     paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6,

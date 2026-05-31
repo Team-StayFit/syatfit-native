@@ -1,26 +1,30 @@
-import React, { useState } from 'react';
+import React from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
-  TouchableOpacity, Image, Dimensions, ActivityIndicator,
+  TouchableOpacity, Image, Dimensions, ActivityIndicator, Alert,
 } from 'react-native';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { useUserFinance } from '@/hooks/useUserFinance';
 import { usePropertyDetail } from '@/hooks/useProperty';
+import { useCheckFavorite, useToggleFavorite } from '@/hooks/useFavorite';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function PropertyDetailScreen() {
   const { id } = useLocalSearchParams();
   const insets = useSafeAreaInsets();
-  const [isFavorite, setIsFavorite] = useState(false);
 
   // 재무 정보 가져오기 (DSR 계산용)
   const { data: financeData } = useUserFinance();
 
   // 매물 상세 정보 API 호출
   const { data: propertyData, isLoading, error } = usePropertyDetail(id as string);
+
+  // 찜 상태 조회 및 토글
+  const { data: isFavorite = false } = useCheckFavorite(id as string);
+  const { mutate: toggleFavorite, isPending: isTogglingFavorite } = useToggleFavorite();
 
   // 임시 데이터 (API 데이터가 없을 경우)
   const mockProperty = {
@@ -107,6 +111,24 @@ export default function PropertyDetailScreen() {
   const dsr = calculateDSR();
   const isDsrSafe = dsr ? dsr < 40 : null;
 
+  // 찜 토글 핸들러
+  const handleToggleFavorite = () => {
+    if (isTogglingFavorite) return;
+
+    toggleFavorite(
+      { propertyId: Number(id), isFavorite },
+      {
+        onSuccess: () => {
+          // 성공 시 아무것도 안해도 됨 (자동으로 캐시 업데이트)
+        },
+        onError: (error) => {
+          console.error('찜 토글 실패:', error);
+          Alert.alert('오류', '찜하기에 실패했습니다. 다시 시도해주세요.');
+        },
+      }
+    );
+  };
+
   // 인프라 아이콘
   const getInfraIcon = (category: string) => {
     switch (category) {
@@ -131,10 +153,13 @@ export default function PropertyDetailScreen() {
         </TouchableOpacity>
         <TouchableOpacity
           style={styles.favoriteBtn}
-          onPress={() => setIsFavorite(!isFavorite)}
+          onPress={handleToggleFavorite}
           activeOpacity={0.7}
+          disabled={isTogglingFavorite}
         >
-          <Text style={styles.favoriteIcon}>{isFavorite ? '❤️' : '🤍'}</Text>
+          <Text style={styles.favoriteIcon}>
+            {isTogglingFavorite ? '⏳' : isFavorite ? '❤️' : '🤍'}
+          </Text>
         </TouchableOpacity>
       </View>
 

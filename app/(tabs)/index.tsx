@@ -8,6 +8,7 @@ import { router } from 'expo-router';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { useUserFinance } from '@/hooks/useUserFinance';
 import { useMyInfo } from '@/hooks/useUser';
+import { useCheckFavorite, useToggleFavorite } from '@/hooks/useFavorite';
 
 const RECOMMENDED = [
   { id: '1', name: '래미안 퍼스티지', location: '서초구 반포동', price: '13억 5,000', type: '매매', dsr: 37.5, suitable: true },
@@ -168,17 +169,7 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
           {RECENT.map((r) => (
-            <View key={r.id} style={styles.recentCard}>
-              <View style={styles.recentThumb} />
-              <View style={styles.recentInfo}>
-                <Text style={styles.recentName}>{r.name}</Text>
-                <Text style={styles.recentLoc}>{r.location} · {r.type}</Text>
-              </View>
-              <View style={styles.recentRight}>
-                <Text style={styles.recentPrice}>{r.price}</Text>
-                {r.suitable && <Text style={styles.suitTag}>✓ 적합</Text>}
-              </View>
-            </View>
+            <RecentCard key={r.id} item={r} />
           ))}
 
           <View style={{ height: 32 }} />
@@ -189,6 +180,25 @@ export default function HomeScreen() {
 }
 
 function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
+  // 찜 상태 조회 및 토글
+  const { data: isFavorite = false } = useCheckFavorite(item.id);
+  const { mutate: toggleFavorite, isPending: isTogglingFavorite } = useToggleFavorite();
+
+  // 찜 토글 핸들러
+  const handleToggleFavorite = (e: any) => {
+    e.stopPropagation(); // 카드 클릭 방지
+    if (isTogglingFavorite) return;
+
+    toggleFavorite(
+      { propertyId: Number(item.id), isFavorite },
+      {
+        onError: (error) => {
+          console.error('찜 토글 실패:', error);
+        },
+      }
+    );
+  };
+
   return (
     <TouchableOpacity
       style={styles.propCard}
@@ -199,6 +209,16 @@ function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
         <View style={styles.propTag}>
           <Text style={styles.propTagText}>{item.type}</Text>
         </View>
+        <TouchableOpacity
+          onPress={handleToggleFavorite}
+          disabled={isTogglingFavorite}
+          style={styles.propFavoriteBtn}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.propFavoriteIcon}>
+            {isTogglingFavorite ? '⏳' : isFavorite ? '❤️' : '🤍'}
+          </Text>
+        </TouchableOpacity>
         {item.suitable ? (
           <View style={styles.propFit}>
             <Text style={styles.propFitText}>✓ 적합</Text>
@@ -215,6 +235,55 @@ function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
         <Text style={styles.propPrice}>{item.price}</Text>
         <Text style={styles.propDsr}>DSR {item.dsr}%</Text>
       </View>
+    </TouchableOpacity>
+  );
+}
+
+function RecentCard({ item }: { item: typeof RECENT[0] }) {
+  // 찜 상태 조회 및 토글
+  const { data: isFavorite = false } = useCheckFavorite(item.id);
+  const { mutate: toggleFavorite, isPending: isTogglingFavorite } = useToggleFavorite();
+
+  // 찜 토글 핸들러
+  const handleToggleFavorite = (e: any) => {
+    e.stopPropagation(); // 카드 클릭 방지
+    if (isTogglingFavorite) return;
+
+    toggleFavorite(
+      { propertyId: Number(item.id), isFavorite },
+      {
+        onError: (error) => {
+          console.error('찜 토글 실패:', error);
+        },
+      }
+    );
+  };
+
+  return (
+    <TouchableOpacity
+      style={styles.recentCard}
+      activeOpacity={0.85}
+      onPress={() => router.push(`/property/${item.id}`)}
+    >
+      <View style={styles.recentThumb} />
+      <View style={styles.recentInfo}>
+        <Text style={styles.recentName}>{item.name}</Text>
+        <Text style={styles.recentLoc}>{item.location} · {item.type}</Text>
+      </View>
+      <View style={styles.recentRight}>
+        <Text style={styles.recentPrice}>{item.price}</Text>
+        {item.suitable && <Text style={styles.suitTag}>✓ 적합</Text>}
+      </View>
+      <TouchableOpacity
+        onPress={handleToggleFavorite}
+        disabled={isTogglingFavorite}
+        style={styles.recentFavoriteBtn}
+        activeOpacity={0.7}
+      >
+        <Text style={styles.recentFavoriteIcon}>
+          {isTogglingFavorite ? '⏳' : isFavorite ? '❤️' : '🤍'}
+        </Text>
+      </TouchableOpacity>
     </TouchableOpacity>
   );
 }
@@ -329,6 +398,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7, paddingVertical: 3,
   },
   propTagText: { fontSize: 10, fontWeight: '700', color: colors.white },
+  propFavoriteBtn: {
+    position: 'absolute', top: 8, right: 8,
+    backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 12,
+    width: 24, height: 24,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  propFavoriteIcon: { fontSize: 12 },
   propFit: {
     position: 'absolute', bottom: 8, right: 8,
     backgroundColor: colors.mintLight, borderRadius: 4,
@@ -347,6 +423,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row', alignItems: 'center',
     gap: 12, marginBottom: 10,
     borderWidth: 0.5, borderColor: colors.border,
+    position: 'relative',
   },
   recentThumb: { width: 52, height: 52, borderRadius: 12, backgroundColor: '#DDE3EF' },
   recentInfo: { flex: 1 },
@@ -355,4 +432,11 @@ const styles = StyleSheet.create({
   recentRight: { alignItems: 'flex-end' },
   recentPrice: { fontSize: 13, fontWeight: '800', color: colors.navy, letterSpacing: -0.3 },
   suitTag: { fontSize: 10, color: colors.mint, fontWeight: '700', marginTop: 2 },
+  recentFavoriteBtn: {
+    position: 'absolute', top: 10, right: 10,
+    backgroundColor: 'rgba(255,255,255,0.9)', borderRadius: 12,
+    width: 24, height: 24,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  recentFavoriteIcon: { fontSize: 12 },
 });
