@@ -7,7 +7,6 @@ import { router } from 'expo-router';
 import { useAtom } from 'jotai';
 import { financialProfileAtom } from '@/atoms/financialProfile';
 import { colors, radius, spacing } from '@/constants/tokens';
-import { useUpdateUserFinance } from '@/hooks/useUserFinance';
 
 const REGIONS = ['서울', '경기', '인천', '부산', '대구', '기타'];
 
@@ -20,9 +19,6 @@ export default function FinancialProfile() {
   const [capital, setCapital] = useState('120000000'); // 1억 2천만원
   const [totalDebt, setTotalDebt] = useState('35000000'); // 3500만원
   const [isHomeOwner, setIsHomeOwner] = useState(false);
-
-  // API mutation
-  const { mutate: saveFinance, isPending } = useUpdateUserFinance();
 
   const toggleRegion = (r: string) => {
     setSelectedRegions((prev) =>
@@ -39,42 +35,20 @@ export default function FinancialProfile() {
       return;
     }
 
-    // API 저장 (인증이 필요할 수 있음 - 실패해도 계속 진행)
-    saveFinance(
-      {
+    // 로그인 전이라 인증 토큰이 없으므로 여기서는 API 호출 없이 임시 저장만 한다.
+    // 로그인 성공 직후(useLogin onSuccess)에 PATCH /users/me/finance 로 전송된다.
+    setProfile({
+      income: Number(annualIncome) / 10000,
+      assets: Number(capital) / 10000,
+      debt: Number(totalDebt) / 10000,
+      regions: selectedRegions,
+      pendingFinance: {
         annual_income: Number(annualIncome),
         capital: Number(capital),
         total_debt_amount: Number(totalDebt) || 0,
         monthly_repayment: 0, // 월 상환액은 나중에 추가
         is_home_owner: isHomeOwner,
       },
-      {
-        onSuccess: () => {
-          console.log('재무 정보 저장 성공');
-        },
-        onError: (error) => {
-          console.log('재무 정보 저장 실패:', error);
-
-          // 서버 연결 에러인 경우
-          if ((error as any).isServerError) {
-            const retrySeconds = (error as any).retryAfter || 120;
-            Alert.alert(
-              '서버 연결 오류',
-              `백엔드 서버가 일시적으로 연결 불가 상태입니다.\n약 ${retrySeconds}초 후에 다시 시도해주세요.`,
-              [{ text: '확인' }]
-            );
-          }
-          // 에러가 나도 계속 진행 (로그인 후 다시 입력할 수 있음)
-        },
-      }
-    );
-
-    // 로컬 상태 저장
-    setProfile({
-      income: Number(annualIncome) / 10000,
-      assets: Number(capital) / 10000,
-      debt: Number(totalDebt) / 10000,
-      regions: selectedRegions,
     });
 
     router.push('/onboarding/login');
@@ -169,11 +143,8 @@ export default function FinancialProfile() {
           style={styles.btnPrimary}
           onPress={handleNext}
           activeOpacity={0.85}
-          disabled={isPending}
         >
-          <Text style={styles.btnPrimaryText}>
-            {isPending ? '저장 중...' : '다음 단계'}
-          </Text>
+          <Text style={styles.btnPrimaryText}>다음 단계</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>

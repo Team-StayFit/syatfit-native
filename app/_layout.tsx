@@ -1,9 +1,8 @@
 import { Stack } from 'expo-router';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { QueryClientProvider } from '@tanstack/react-query';
 import { StatusBar } from 'expo-status-bar';
 import { colors } from '@/constants/colors';
-
-const queryClient = new QueryClient();
+import { queryClient } from '@/lib/queryClient';
 
 export default function RootLayout() {
   return (
