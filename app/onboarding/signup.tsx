@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import { router } from 'expo-router';
 import { colors, radius, spacing } from '@/constants/tokens';
-import { useSignup } from '@/hooks/useAuth';
+import { useSignup, useCheckUsernameExists } from '@/hooks/useAuth';
 
 export default function SignupScreen() {
   const [email, setEmail] = useState('');
@@ -13,7 +13,41 @@ export default function SignupScreen() {
   const [username, setUsername] = useState('');
   const [nickname, setNickname] = useState('');
 
+  // 아이디 중복확인 결과: null(미확인) / true(사용가능) / false(중복)
+  const [usernameAvailable, setUsernameAvailable] = useState<boolean | null>(null);
+  const [checkedUsername, setCheckedUsername] = useState('');
+
   const { mutate: signupMutation, isPending } = useSignup();
+  const { mutate: checkUsername, isPending: isChecking } = useCheckUsernameExists();
+
+  const handleUsernameChange = (text: string) => {
+    setUsername(text);
+    // 아이디를 수정하면 기존 중복확인 결과는 무효화
+    if (text !== checkedUsername) {
+      setUsernameAvailable(null);
+    }
+  };
+
+  const handleCheckUsername = () => {
+    if (username.length < 4) {
+      Alert.alert('알림', '사용자 이름은 최소 4자 이상이어야 합니다.');
+      return;
+    }
+
+    checkUsername(username, {
+      onSuccess: (exists) => {
+        setCheckedUsername(username);
+        setUsernameAvailable(!exists);
+        if (exists) {
+          Alert.alert('알림', '이미 사용 중인 아이디입니다.');
+        }
+      },
+      onError: (error: any) => {
+        console.error('아이디 중복 확인 실패:', error);
+        Alert.alert('오류', '중복 확인 중 오류가 발생했습니다. 다시 시도해주세요.');
+      },
+    });
+  };
 
   const handleSignup = async () => {
     // 유효성 검증
@@ -24,6 +58,11 @@ export default function SignupScreen() {
 
     if (username.length < 4) {
       Alert.alert('알림', '사용자 이름은 최소 4자 이상이어야 합니다.');
+      return;
+    }
+
+    if (checkedUsername !== username || usernameAvailable !== true) {
+      Alert.alert('알림', '아이디 중복확인을 먼저 진행해주세요.');
       return;
     }
 
@@ -97,15 +136,33 @@ export default function SignupScreen() {
 
           <View style={styles.formGroup}>
             <Text style={styles.label}>사용자 이름 (최소 4자)</Text>
-            <TextInput
-              style={styles.input}
-              value={username}
-              onChangeText={setUsername}
-              placeholder="username"
-              placeholderTextColor={colors.mutedLight}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
+            <View style={styles.row}>
+              <TextInput
+                style={[styles.input, styles.rowInput]}
+                value={username}
+                onChangeText={handleUsernameChange}
+                placeholder="username"
+                placeholderTextColor={colors.mutedLight}
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <TouchableOpacity
+                style={[styles.checkBtn, isChecking && styles.btnDisabled]}
+                onPress={handleCheckUsername}
+                disabled={isChecking}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.checkBtnText}>
+                  {isChecking ? '확인 중...' : '중복확인'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {usernameAvailable === true && username === checkedUsername && (
+              <Text style={styles.successText}>사용 가능한 아이디입니다.</Text>
+            )}
+            {usernameAvailable === false && username === checkedUsername && (
+              <Text style={styles.errorText}>이미 사용 중인 아이디입니다.</Text>
+            )}
           </View>
 
           <View style={styles.formGroup}>
@@ -205,6 +262,36 @@ const styles = StyleSheet.create({
     padding: 16,
     fontSize: 15,
     color: colors.navy,
+  },
+
+  row: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  rowInput: {
+    flex: 1,
+  },
+  checkBtn: {
+    backgroundColor: colors.navy,
+    borderRadius: radius.md,
+    paddingHorizontal: 16,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  checkBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.white,
+  },
+  successText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#2E7D32',
+  },
+  errorText: {
+    marginTop: 6,
+    fontSize: 12,
+    color: '#C62828',
   },
 
   btnPrimary: {

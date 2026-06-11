@@ -325,6 +325,24 @@ export default function PropertyDetailScreen() {
               <Text style={styles.loanNotice}>
                 * 실제 대출 조건은 금융기관 심사에 따라 달라질 수 있습니다
               </Text>
+              <TouchableOpacity
+                style={styles.simulationBtn}
+                onPress={() =>
+                  router.push({
+                    pathname: `/loans/${id}`,
+                    params: {
+                      propertyData: JSON.stringify({
+                        name: property.name,
+                        price: property.price,
+                        transactionType: property.transactionType,
+                      }),
+                    },
+                  })
+                }
+                activeOpacity={0.85}
+              >
+                <Text style={styles.simulationBtnText}>대출 상품 비교 · 시뮬레이션 →</Text>
+              </TouchableOpacity>
             </View>
           )}
 
@@ -547,6 +565,18 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: colors.muted,
     lineHeight: 16,
+    marginBottom: 12,
+  },
+  simulationBtn: {
+    backgroundColor: colors.navy,
+    borderRadius: radius.md,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  simulationBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: colors.white,
   },
 
   bottomBar: {

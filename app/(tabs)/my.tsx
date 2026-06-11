@@ -140,7 +140,11 @@ export default function MyScreen() {
                 </>
               )}
             </View>
-            <TouchableOpacity style={styles.editBtn}>
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => router.push('/profile/edit')}
+              activeOpacity={0.7}
+            >
               <Text style={styles.editBtnText}>편집</Text>
             </TouchableOpacity>
           </View>

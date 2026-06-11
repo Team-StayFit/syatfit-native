@@ -1,11 +1,18 @@
 import { useMutation } from '@tanstack/react-query';
-import { signup, login, logout, SignupRequest, LoginRequest } from '@/lib/api/auth';
+import { signup, login, logout, checkUsernameExists, SignupRequest, LoginRequest } from '@/lib/api/auth';
 import { saveAuthData, clearAuthData } from '@/lib/utils/tokenStorage';
 
 // 회원가입 훅
 export const useSignup = () => {
   return useMutation({
     mutationFn: (data: SignupRequest) => signup(data),
+  });
+};
+
+// 아이디 중복 확인 훅
+export const useCheckUsernameExists = () => {
+  return useMutation({
+    mutationFn: (username: string) => checkUsernameExists(username),
   });
 };
 

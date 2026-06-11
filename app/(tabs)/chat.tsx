@@ -8,6 +8,7 @@ import Markdown from 'react-native-markdown-display';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { streamRecommendation, streamChatMessage } from '@/lib/api/aiClient';
 import { useUserFinance } from '@/hooks/useUserFinance';
+import { parseAiMarkdown, type ChipData, type LoanCard, type PropertyCard } from '@/lib/utils/parseAiMarkdown';
 
 type ChatState = 'empty' | 'streaming' | 'done';
 
@@ -280,6 +281,8 @@ export default function ChatScreen() {
           } else {
             // AI message
             const displayText = message.isStreaming ? streamText : message.content;
+            // 스트리밍 중에도 1./2./3. 섹션과 표를 실시간으로 칩/카드 UI로 구조화해서 보여줌
+            const parsed = displayText ? parseAiMarkdown(displayText) : null;
             return (
               <View key={message.id} style={styles.aiBubbleRow}>
                 <View style={styles.aiAvatar}>
@@ -288,11 +291,31 @@ export default function ChatScreen() {
                 <View style={styles.aiContent}>
                   <Text style={styles.aiName}>STAYFIT AI</Text>
                   <View style={styles.aiBubble}>
-                    {displayText ? (
+                    {displayText && parsed ? (
                       <>
-                        <Markdown style={markdownStyles}>
-                          {displayText}
-                        </Markdown>
+                        {!!parsed.text && (
+                          <Markdown style={markdownStyles} rules={markdownRules}>
+                            {parsed.text}
+                          </Markdown>
+                        )}
+                        {parsed.chips.length > 0 && (
+                          <ChipsRow chips={parsed.chips} />
+                        )}
+                        {parsed.properties.length > 0 && (
+                          <PropertyCards properties={parsed.properties} />
+                        )}
+                        {parsed.loans.length > 0 && (
+                          <LoanCards loans={parsed.loans} />
+                        )}
+                        {/* 구조화할 내용이 아직 하나도 없으면(스트리밍 초반) 원문을 그대로 표시 */}
+                        {!parsed.text &&
+                          parsed.chips.length === 0 &&
+                          parsed.properties.length === 0 &&
+                          parsed.loans.length === 0 && (
+                            <Markdown style={markdownStyles} rules={markdownRules}>
+                              {displayText}
+                            </Markdown>
+                          )}
                         {message.isStreaming && (
                           <Text style={styles.cursor}>|</Text>
                         )}
@@ -345,8 +368,79 @@ function EmptyState({ onSelect }: { onSelect: (q: string) => void }) {
   );
 }
 
-// LLMResultCards 컴포넌트는 향후 구조화된 응답 처리 시 사용
-// function LLMResultCards({ data }: { data: LLMResponse }) { ... }
+// AI 응답에서 추출한 요약 칩 (구매예산 / LTV / DSR 등)
+function ChipsRow({ chips }: { chips: ChipData[] }) {
+  return (
+    <View style={styles.chipRow}>
+      {chips.map((chip) => (
+        <View key={chip.label} style={styles.chipItem}>
+          <Text style={styles.chipVal}>{chip.value}</Text>
+          <Text style={styles.chipLbl}>{chip.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// AI 응답에서 추출한 추천 매물 카드 (가로 스크롤)
+function PropertyCards({ properties }: { properties: PropertyCard[] }) {
+  return (
+    <View style={styles.resultWrap}>
+      <Text style={styles.resultSect}>추천 매물</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.propScroll}
+      >
+        {properties.map((p, idx) => (
+          <View key={idx} style={styles.miniPropCard}>
+            <View style={styles.miniPropImg}>
+              {!!p.type && (
+                <View style={styles.miniTag}>
+                  <Text style={styles.miniTagText}>{p.type}</Text>
+                </View>
+              )}
+              {!!p.fit && (
+                <View style={styles.miniFit}>
+                  <Text style={styles.miniFitText}>{p.fit}</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.miniPropBody}>
+              <Text style={styles.miniPropName} numberOfLines={1}>{p.name}</Text>
+              {!!p.location && (
+                <Text style={styles.miniPropLoc} numberOfLines={1}>{p.location}</Text>
+              )}
+              {!!p.price && <Text style={styles.miniPropPrice}>{p.price}</Text>}
+              {!!p.dsr && <Text style={styles.miniDsr}>DSR {p.dsr}</Text>}
+            </View>
+          </View>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// AI 응답에서 추출한 추천 대출 상품 목록
+function LoanCards({ loans }: { loans: LoanCard[] }) {
+  return (
+    <View style={styles.resultWrap}>
+      <Text style={styles.resultSect}>추천 대출 상품</Text>
+      {loans.map((l, idx) => (
+        <View key={idx} style={styles.loanCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.loanName}>{l.name}</Text>
+            {!!l.bankInfo && <Text style={styles.loanType}>{l.bankInfo}</Text>}
+          </View>
+          <View>
+            {!!l.rate && <Text style={styles.loanRate}>{l.rate}</Text>}
+            {!!l.maxAmount && <Text style={styles.loanMax}>{l.maxAmount}</Text>}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
 
 function InputBar({
   disabled, onSend, insets,
@@ -479,7 +573,7 @@ const styles = StyleSheet.create({
     borderRadius: 14, overflow: 'hidden',
     borderWidth: 0.5, borderColor: colors.border,
   },
-  miniPropImg: { height: 78, position: 'relative' },
+  miniPropImg: { height: 78, position: 'relative', backgroundColor: colors.cardBg },
   miniTag: {
     position: 'absolute', top: 6, left: 6,
     backgroundColor: colors.navy, borderRadius: 4,
@@ -608,4 +702,73 @@ const markdownStyles = StyleSheet.create({
     height: 1,
     marginVertical: 10,
   },
+  // 표(table) 스타일
+  table: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    marginVertical: 8,
+    overflow: 'hidden',
+  },
+  thead: {
+    backgroundColor: colors.navy,
+  },
+  tbody: {},
+  tr: {
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+  },
+  th: {
+    flex: 1,
+    minWidth: 90,
+    padding: 8,
+  },
+  td: {
+    flex: 1,
+    minWidth: 90,
+    padding: 8,
+  },
 });
+
+// 표(table) 헤더/셀 텍스트 스타일 (커스텀 렌더 규칙에서 사용)
+const tableTextStyles = StyleSheet.create({
+  th: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.white,
+    lineHeight: 17,
+  },
+  td: {
+    fontSize: 12,
+    color: colors.navy,
+    lineHeight: 17,
+  },
+  scroll: {
+    marginVertical: 4,
+  },
+});
+
+// 마크다운 커스텀 렌더 규칙 (표를 가로 스크롤 가능하게 + 헤더/셀 텍스트 스타일 적용)
+const markdownRules = {
+  table: (node: any, children: any, parent: any, styles: any) => (
+    <ScrollView
+      key={node.key}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={tableTextStyles.scroll}
+    >
+      <View style={styles._VIEW_SAFE_table}>{children}</View>
+    </ScrollView>
+  ),
+  th: (node: any, children: any, parent: any, styles: any) => (
+    <View key={node.key} style={styles._VIEW_SAFE_th}>
+      <Text style={tableTextStyles.th}>{children}</Text>
+    </View>
+  ),
+  td: (node: any, children: any, parent: any, styles: any) => (
+    <View key={node.key} style={styles._VIEW_SAFE_td}>
+      <Text style={tableTextStyles.td}>{children}</Text>
+    </View>
+  ),
+};

@@ -53,7 +53,12 @@ export async function streamRecommendation(
           if (line.startsWith('data: ')) {
             const text = line.substring(6); // "data: " 제거
             console.log('[SSE] Raw chunk:', JSON.stringify(text));
-            if (text.trim() && text.trim() !== '[DONE]') {
+            if (text === '[DONE]') {
+              // 스트림 종료 마커는 무시
+            } else if (text === '') {
+              // 빈 data 라인은 토큰이 개행 문자(\n)임을 의미함
+              onChunk('\n');
+            } else {
               onChunk(text);
             }
           } else if (line.trim()) {
@@ -120,43 +125,57 @@ export async function streamChatMessage(
     xhr.setRequestHeader('Content-Type', 'application/json');
 
     let previousLength = 0;
+    let isJsonResponse = false;
 
     xhr.onprogress = () => {
       const currentText = xhr.responseText;
       const newText = currentText.substring(previousLength);
       previousLength = currentText.length;
 
-      if (newText) {
-        // SSE 형식 파싱
-        const lines = newText.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const text = line.substring(6);
-            console.log('[Chat SSE] Raw chunk:', JSON.stringify(text));
-            if (text.trim() && text.trim() !== '[DONE]') {
-              onChunk(text);
-            }
-          } else if (line.trim() && !line.startsWith('data:')) {
-            console.log('[Chat SSE] Non-data line:', JSON.stringify(line));
-            // SSE 형식이 아닌 경우 (일반 JSON 응답)
-            try {
-              const data = JSON.parse(line);
-              if (data.reply) {
-                onChunk(data.reply);
-              }
-            } catch {
-              // JSON 파싱 실패 시 그냥 텍스트로 처리
-              if (line.trim()) {
-                onChunk(line);
-              }
-            }
+      if (!newText) return;
+
+      // 응답이 SSE("data: ...")가 아니라 단일 JSON 객체({"reply": ...})로 오는 경우,
+      // 줄 단위로 끊어서 처리하면 JSON이 중간에 잘려 깨진 텍스트로 표시될 수 있다.
+      // 이 경우 onload에서 전체 응답을 받은 뒤 한 번에 파싱한다.
+      if (!isJsonResponse && currentText.trimStart().startsWith('{')) {
+        isJsonResponse = true;
+      }
+      if (isJsonResponse) {
+        return;
+      }
+
+      // SSE 형식 파싱
+      const lines = newText.split('\n');
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          const text = line.substring(6);
+          console.log('[Chat SSE] Raw chunk:', JSON.stringify(text));
+          if (text === '[DONE]') {
+            // 스트림 종료 마커는 무시
+          } else if (text === '') {
+            // 빈 data 라인은 토큰이 개행 문자(\n)임을 의미함
+            onChunk('\n');
+          } else {
+            onChunk(text);
           }
+        } else if (line.trim()) {
+          console.log('[Chat SSE] Non-data line:', JSON.stringify(line));
         }
       }
     };
 
     xhr.onload = () => {
       if (xhr.status === 200) {
+        if (isJsonResponse) {
+          try {
+            const data = JSON.parse(xhr.responseText);
+            if (data.reply) {
+              onChunk(data.reply);
+            }
+          } catch (e) {
+            console.log('[Chat] JSON parse failed:', e);
+          }
+        }
         onComplete();
         resolve();
       } else {
