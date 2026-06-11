@@ -355,7 +355,12 @@ function SavedPropertyCard({ property }: { property: any }) {
   return (
     <TouchableOpacity
       style={styles.savedCard}
-      onPress={() => router.push(`/property/${property.propertyId}`)}
+      onPress={() =>
+        router.push({
+          pathname: `/property/${property.propertyId}`,
+          params: { propertyData: JSON.stringify(property) },
+        })
+      }
       activeOpacity={0.8}
     >
       <View style={styles.savedThumb} />

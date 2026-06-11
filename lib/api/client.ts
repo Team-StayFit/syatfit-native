@@ -3,7 +3,7 @@ import { getAccessToken } from '../utils/tokenStorage';
 
 // API 베이스 URL 설정
 // 개발/프로덕션 모두 배포된 서버 사용
-export const API_BASE_URL = 'https://stayfit-back-api.ngelsh.com/api/v1';
+export const API_BASE_URL = 'https://stayfit-api.ngelsh.com/back/api/v1';
 
 // Axios 인스턴스 생성
 export const apiClient = axios.create({

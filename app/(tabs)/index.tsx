@@ -9,16 +9,75 @@ import { colors, radius, spacing } from '@/constants/tokens';
 import { useUserFinance } from '@/hooks/useUserFinance';
 import { useMyInfo } from '@/hooks/useUser';
 import { useCheckFavorite, useToggleFavorite } from '@/hooks/useFavorite';
+import { usePropertySearch, useRecentProperties } from '@/hooks/useProperty';
 
+// API 형식에 맞춘 mock 데이터
 const RECOMMENDED = [
-  { id: '1', name: '래미안 퍼스티지', location: '서초구 반포동', price: '13억 5,000', type: '매매', dsr: 37.5, suitable: true },
-  { id: '2', name: '파크스테이트 광교', location: '수원시 영통구', price: '전 4억 8,000', type: '전세', dsr: 35.2, suitable: true },
-  { id: '3', name: '아크로 서울포레스트', location: '성동구 성수동', price: '18억 2,000', type: '매매', dsr: 41.2, suitable: false },
+  {
+    propertyId: 1,
+    name: '래미안 퍼스티지',
+    roadAddress: '서울시 서초구 반포동 123-45',
+    transactionType: 'TRADING',
+    price: 135000, // 만원 단위
+    monthlyRent: 0,
+    exclusiveArea: 84.5,
+    builder: '삼성물산',
+    parkingRatio: 120,
+    infrastructures: [
+      { category: 'SUBWAY', placeName: '신반포역', distance: 350 },
+    ],
+  },
+  {
+    propertyId: 2,
+    name: '파크스테이트 광교',
+    roadAddress: '경기도 수원시 영통구',
+    transactionType: 'LEASE',
+    price: 48000,
+    monthlyRent: 0,
+    exclusiveArea: 59.5,
+    builder: '대우건설',
+    parkingRatio: 150,
+    infrastructures: [],
+  },
+  {
+    propertyId: 3,
+    name: '아크로 서울포레스트',
+    roadAddress: '서울시 성동구 성수동',
+    transactionType: 'TRADING',
+    price: 182000,
+    monthlyRent: 0,
+    exclusiveArea: 114.2,
+    builder: '대림산업',
+    parkingRatio: 130,
+    infrastructures: [],
+  },
 ];
 
 const RECENT = [
-  { id: '1', name: '아이디 레스트', location: '마포구 연남동', price: '9억 5,000', type: '매매', suitable: true },
-  { id: '2', name: '브라이튼 여의도', location: '영등포구 여의도동', price: '전 3억 2,000', type: '전세', suitable: true },
+  {
+    propertyId: 4,
+    name: '아이디 레스트',
+    roadAddress: '서울시 마포구 연남동',
+    transactionType: 'TRADING',
+    price: 95000,
+    monthlyRent: 0,
+    exclusiveArea: 84.0,
+    builder: '현대건설',
+    parkingRatio: 110,
+    infrastructures: [],
+  },
+  {
+    propertyId: 5,
+    name: '브라이튼 여의도',
+    roadAddress: '서울시 영등포구 여의도동',
+    transactionType: 'LEASE',
+    price: 32000,
+    monthlyRent: 0,
+    exclusiveArea: 49.5,
+    builder: 'GS건설',
+    parkingRatio: 100,
+    infrastructures: [],
+  },
 ];
 
 export default function HomeScreen() {
@@ -32,6 +91,14 @@ export default function HomeScreen() {
 
   // API 호출: 재무 정보 조회
   const { data: financeData, isLoading: financeLoading } = useUserFinance();
+
+  // API 호출: 추천 매물 (마포구 기준)
+  const { data: recommendedData, isLoading: recommendedLoading } = usePropertySearch({
+    sgg_name: '마포구',
+  });
+
+  // 최근 본 매물 목록
+  const { properties: recentProperties, isLoading: recentLoading } = useRecentProperties();
 
   // 재무 데이터 포맷팅
   const formatIncome = (income?: number) => {
@@ -64,6 +131,9 @@ export default function HomeScreen() {
   };
 
   const score = calculateScore();
+
+  // 추천 매물: API 데이터 or mock 데이터
+  const recommendedProperties = recommendedData?.properties?.slice(0, 3) || RECOMMENDED;
 
   return (
     <View style={styles.root}>
@@ -152,14 +222,20 @@ export default function HomeScreen() {
               <Text style={styles.sectionMore}>전체보기 →</Text>
             </TouchableOpacity>
           </View>
-          <FlatList
-            horizontal
-            data={RECOMMENDED}
-            keyExtractor={(i) => i.id}
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.hScroll}
-            renderItem={({ item }) => <PropertyCard item={item} />}
-          />
+          {recommendedLoading ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={colors.navy} />
+            </View>
+          ) : (
+            <FlatList
+              horizontal
+              data={recommendedProperties}
+              keyExtractor={(i) => i.propertyId.toString()}
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.hScroll}
+              renderItem={({ item }) => <PropertyCard item={item} />}
+            />
+          )}
 
           {/* Recent */}
           <View style={styles.sectionHeader}>
@@ -168,9 +244,20 @@ export default function HomeScreen() {
               <Text style={styles.sectionMore}>더보기 →</Text>
             </TouchableOpacity>
           </View>
-          {RECENT.map((r) => (
-            <RecentCard key={r.id} item={r} />
-          ))}
+          {recentLoading ? (
+            <View style={{ padding: 20, alignItems: 'center' }}>
+              <ActivityIndicator size="small" color={colors.navy} />
+            </View>
+          ) : recentProperties.length === 0 ? (
+            <View style={styles.emptyRecent}>
+              <Text style={styles.emptyRecentText}>최근 본 매물이 없습니다</Text>
+              <Text style={styles.emptyRecentSub}>매물을 둘러보고 마음에 드는 곳을 확인해보세요</Text>
+            </View>
+          ) : (
+            recentProperties.map((r, idx) => (
+              <RecentCard key={r.propertyId || `recent-${idx}`} item={r} />
+            ))
+          )}
 
           <View style={{ height: 32 }} />
         </View>
@@ -181,8 +268,26 @@ export default function HomeScreen() {
 
 function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
   // 찜 상태 조회 및 토글
-  const { data: isFavorite = false } = useCheckFavorite(item.id);
+  const { data: isFavorite = false } = useCheckFavorite(item.propertyId);
   const { mutate: toggleFavorite, isPending: isTogglingFavorite } = useToggleFavorite();
+
+  // 가격 포맷팅
+  const formatPrice = (priceManWon: number) => {
+    if (!priceManWon || priceManWon === 0) return '가격 미정';
+    const eok = Math.floor(priceManWon / 10000);
+    const man = priceManWon % 10000;
+    if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만`;
+    if (eok > 0) return `${eok}억`;
+    return `${man.toLocaleString()}만`;
+  };
+
+  // 거래 유형 한글
+  const getTypeLabel = (type: string) => {
+    if (type === 'TRADING') return '매매';
+    if (type === 'LEASE') return '전세';
+    if (type === 'RENT') return '월세';
+    return type;
+  };
 
   // 찜 토글 핸들러
   const handleToggleFavorite = (e: any) => {
@@ -190,7 +295,7 @@ function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
     if (isTogglingFavorite) return;
 
     toggleFavorite(
-      { propertyId: Number(item.id), isFavorite },
+      { propertyId: item.propertyId, isFavorite },
       {
         onError: (error) => {
           console.error('찜 토글 실패:', error);
@@ -203,11 +308,16 @@ function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
     <TouchableOpacity
       style={styles.propCard}
       activeOpacity={0.85}
-      onPress={() => router.push(`/property/${item.id}`)}
+      onPress={() =>
+        router.push({
+          pathname: `/property/${item.propertyId}`,
+          params: { propertyData: JSON.stringify(item) },
+        })
+      }
     >
       <View style={styles.propImg}>
         <View style={styles.propTag}>
-          <Text style={styles.propTagText}>{item.type}</Text>
+          <Text style={styles.propTagText}>{getTypeLabel(item.transactionType)}</Text>
         </View>
         <TouchableOpacity
           onPress={handleToggleFavorite}
@@ -219,21 +329,11 @@ function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
             {isTogglingFavorite ? '⏳' : isFavorite ? '❤️' : '🤍'}
           </Text>
         </TouchableOpacity>
-        {item.suitable ? (
-          <View style={styles.propFit}>
-            <Text style={styles.propFitText}>✓ 적합</Text>
-          </View>
-        ) : (
-          <View style={[styles.propFit, { backgroundColor: '#FFF0EB' }]}>
-            <Text style={[styles.propFitText, { color: colors.warn }]}>DSR 주의</Text>
-          </View>
-        )}
       </View>
       <View style={styles.propBody}>
         <Text style={styles.propName}>{item.name}</Text>
-        <Text style={styles.propLoc}>{item.location}</Text>
-        <Text style={styles.propPrice}>{item.price}</Text>
-        <Text style={styles.propDsr}>DSR {item.dsr}%</Text>
+        <Text style={styles.propLoc}>{item.roadAddress}</Text>
+        <Text style={styles.propPrice}>{formatPrice(item.price)}</Text>
       </View>
     </TouchableOpacity>
   );
@@ -241,8 +341,26 @@ function PropertyCard({ item }: { item: typeof RECOMMENDED[0] }) {
 
 function RecentCard({ item }: { item: typeof RECENT[0] }) {
   // 찜 상태 조회 및 토글
-  const { data: isFavorite = false } = useCheckFavorite(item.id);
+  const { data: isFavorite = false } = useCheckFavorite(item.propertyId);
   const { mutate: toggleFavorite, isPending: isTogglingFavorite } = useToggleFavorite();
+
+  // 가격 포맷팅
+  const formatPrice = (priceManWon: number) => {
+    if (!priceManWon || priceManWon === 0) return '가격 미정';
+    const eok = Math.floor(priceManWon / 10000);
+    const man = priceManWon % 10000;
+    if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만`;
+    if (eok > 0) return `${eok}억`;
+    return `${man.toLocaleString()}만`;
+  };
+
+  // 거래 유형 한글
+  const getTypeLabel = (type: string) => {
+    if (type === 'TRADING') return '매매';
+    if (type === 'LEASE') return '전세';
+    if (type === 'RENT') return '월세';
+    return type;
+  };
 
   // 찜 토글 핸들러
   const handleToggleFavorite = (e: any) => {
@@ -250,7 +368,7 @@ function RecentCard({ item }: { item: typeof RECENT[0] }) {
     if (isTogglingFavorite) return;
 
     toggleFavorite(
-      { propertyId: Number(item.id), isFavorite },
+      { propertyId: item.propertyId, isFavorite },
       {
         onError: (error) => {
           console.error('찜 토글 실패:', error);
@@ -263,16 +381,22 @@ function RecentCard({ item }: { item: typeof RECENT[0] }) {
     <TouchableOpacity
       style={styles.recentCard}
       activeOpacity={0.85}
-      onPress={() => router.push(`/property/${item.id}`)}
+      onPress={() =>
+        router.push({
+          pathname: `/property/${item.propertyId}`,
+          params: { propertyData: JSON.stringify(item) },
+        })
+      }
     >
       <View style={styles.recentThumb} />
       <View style={styles.recentInfo}>
-        <Text style={styles.recentName}>{item.name}</Text>
-        <Text style={styles.recentLoc}>{item.location} · {item.type}</Text>
+        <Text style={styles.recentName}>{item.name || '매물 이름 없음'}</Text>
+        <Text style={styles.recentLoc}>
+          {item.roadAddress || '주소 없음'} · {getTypeLabel(item.transactionType || 'TRADING')}
+        </Text>
       </View>
       <View style={styles.recentRight}>
-        <Text style={styles.recentPrice}>{item.price}</Text>
-        {item.suitable && <Text style={styles.suitTag}>✓ 적합</Text>}
+        <Text style={styles.recentPrice}>{formatPrice(item.price)}</Text>
       </View>
       <TouchableOpacity
         onPress={handleToggleFavorite}
@@ -439,4 +563,25 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   recentFavoriteIcon: { fontSize: 12 },
+
+  emptyRecent: {
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    padding: 32,
+    alignItems: 'center',
+    borderWidth: 0.5,
+    borderColor: colors.border,
+    marginBottom: 10,
+  },
+  emptyRecentText: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: colors.navy,
+    marginBottom: 4,
+  },
+  emptyRecentSub: {
+    fontSize: 11,
+    color: colors.muted,
+    textAlign: 'center',
+  },
 });

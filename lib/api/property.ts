@@ -7,7 +7,7 @@ export interface PropertySearchCondition {
   transaction_type?: 'TRADING' | 'LEASE' | 'RENT'; // 거래 유형
   max_price?: number; // 최대 가격
   max_monthly_rent?: number; // 최대 월세
-  constructor?: string; // 건설사
+  builder?: string; // 건설사 (백엔드는 constructor 사용하지만 JS 예약어 충돌 방지)
   min_parking_ratio?: number; // 최소 주차 비율
   exclusive_area?: number; // 전용 면적
   infra_categories?: ('SUBWAY' | 'HOSPITAL' | 'SCHOOL' | 'MART')[]; // 인프라 카테고리
@@ -29,7 +29,7 @@ export interface PropertyInfo {
   price: number;
   monthlyRent: number;
   exclusiveArea: number;
-  constructor: string;
+  builder: string; // constructor는 JS 예약어이므로 builder로 사용
   parkingRatio: number;
   infrastructures: InfraDetail[];
 }
@@ -44,7 +44,29 @@ export interface PropertySearchResult {
 export const searchProperties = async (
   condition: PropertySearchCondition
 ): Promise<PropertySearchResult> => {
-  const response = await apiClient.post<PropertySearchResult>('/properties/search', condition);
+  // builder를 constructor로 변환해서 백엔드로 전송 (백엔드는 constructor 사용)
+  const requestBody = { ...condition };
+  if (requestBody.builder) {
+    (requestBody as any).constructor = requestBody.builder;
+    delete requestBody.builder;
+  }
+
+  const response = await apiClient.post<PropertySearchResult>('/properties/search', requestBody);
+
+  // constructor 필드를 builder로 변환 (JS 예약어 충돌 방지)
+  if (response && typeof response === 'object' && 'properties' in response) {
+    const result = response as any;
+    if (Array.isArray(result.properties)) {
+      result.properties = result.properties.map((prop: any) => {
+        if (prop.constructor && typeof prop.constructor === 'string') {
+          return { ...prop, builder: prop.constructor };
+        }
+        return prop;
+      });
+    }
+    return result;
+  }
+
   return response as any;
 };
 
@@ -53,5 +75,14 @@ export const getPropertyDetail = async (
   propertyId: number
 ): Promise<PropertyInfo> => {
   const response = await apiClient.get<PropertyInfo>(`/properties/${propertyId}`);
+
+  // constructor 필드를 builder로 변환 (JS 예약어 충돌 방지)
+  if (response && typeof response === 'object') {
+    const prop = response as any;
+    if (prop.constructor && typeof prop.constructor === 'string') {
+      return { ...prop, builder: prop.constructor };
+    }
+  }
+
   return response as any;
 };

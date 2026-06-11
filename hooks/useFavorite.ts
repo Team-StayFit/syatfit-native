@@ -7,6 +7,8 @@ export const useFavoriteProperties = () => {
     queryKey: ['favorites'],
     queryFn: getFavoriteProperties,
     staleTime: 1000 * 60 * 5, // 5분
+    retry: false, // 백엔드 API 미구현으로 재시도 비활성화
+    enabled: false, // 백엔드 API 미구현으로 비활성화
   });
 };
 
@@ -15,7 +17,8 @@ export const useCheckFavorite = (propertyId: number | string) => {
   return useQuery({
     queryKey: ['favorite', propertyId],
     queryFn: () => checkFavorite(Number(propertyId)),
-    enabled: !!propertyId,
+    enabled: false, // 백엔드 API 미구현으로 비활성화
+    retry: false, // 백엔드 API 미구현으로 재시도 비활성화
     staleTime: 1000 * 60 * 5, // 5분
   });
 };

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, Image, Dimensions, ActivityIndicator, Alert,
@@ -9,17 +9,24 @@ import { colors, radius, spacing } from '@/constants/tokens';
 import { useUserFinance } from '@/hooks/useUserFinance';
 import { usePropertyDetail } from '@/hooks/useProperty';
 import { useCheckFavorite, useToggleFavorite } from '@/hooks/useFavorite';
+import { addRecentProperty } from '@/lib/utils/recentProperties';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
 export default function PropertyDetailScreen() {
-  const { id } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const { id, propertyData: propertyDataParam } = params;
   const insets = useSafeAreaInsets();
+
+  // URL 파라미터로 전달받은 매물 데이터 파싱
+  const passedPropertyData = propertyDataParam
+    ? JSON.parse(propertyDataParam as string)
+    : null;
 
   // 재무 정보 가져오기 (DSR 계산용)
   const { data: financeData } = useUserFinance();
 
-  // 매물 상세 정보 API 호출
+  // 매물 상세 정보 API 호출 (백엔드 미구현으로 비활성화됨)
   const { data: propertyData, isLoading, error } = usePropertyDetail(id as string);
 
   // 찜 상태 조회 및 토글
@@ -36,7 +43,7 @@ export default function PropertyDetailScreen() {
     monthlyRent: 0,
     exclusiveArea: 84.5,
     parkingRatio: 120,
-    constructor: '삼성물산',
+    builder: '삼성물산', // constructor는 JS 예약어이므로 builder로 변경
     completionYear: 2021,
     totalFloors: 25,
     floor: 15,
@@ -49,11 +56,34 @@ export default function PropertyDetailScreen() {
     ],
   };
 
-  // API 데이터가 있으면 사용, 없으면 mock 데이터 사용
-  const property = propertyData || mockProperty;
+  // 우선순위: 파라미터로 전달받은 데이터 > API 데이터 > mock 데이터
+  const rawProperty = passedPropertyData || propertyData || mockProperty;
 
-  // 로딩 상태
-  if (isLoading) {
+  // 주변 인프라 중복 제거 (같은 장소명+카테고리는 하나만)
+  const property = {
+    ...rawProperty,
+    infrastructures: rawProperty.infrastructures
+      ? Array.from(
+          new Map(
+            rawProperty.infrastructures.map((infra: any) => [
+              `${infra.category}-${infra.placeName}`,
+              infra,
+            ])
+          ).values()
+        )
+      : [],
+  };
+
+  // 최근 본 매물에 추가 (propertyId가 있을 때만)
+  useEffect(() => {
+    if (property && property.propertyId) {
+      console.log('📌 최근 본 매물 저장:', property);
+      addRecentProperty(property);
+    }
+  }, [property.propertyId]);
+
+  // 로딩 상태 (파라미터로 데이터를 받았으면 로딩 표시 안 함)
+  if (isLoading && !passedPropertyData) {
     return (
       <View style={[styles.root, styles.centerContainer]}>
         <ActivityIndicator size="large" color={colors.navy} />
@@ -62,8 +92,8 @@ export default function PropertyDetailScreen() {
     );
   }
 
-  // 에러 상태
-  if (error && !propertyData) {
+  // 에러 상태 (파라미터로 데이터를 받았으면 에러 무시)
+  if (error && !propertyData && !passedPropertyData) {
     return (
       <View style={[styles.root, styles.centerContainer]}>
         <Text style={styles.errorText}>❌ 매물 정보를 불러올 수 없습니다</Text>
@@ -97,7 +127,7 @@ export default function PropertyDetailScreen() {
 
   // 간단한 DSR 계산 (실제로는 더 복잡함)
   const calculateDSR = () => {
-    if (!financeData?.annual_income) return null;
+    if (!financeData?.annual_income || !property.price) return null;
 
     const annualIncome = financeData.annual_income;
     const loanAmount = property.price * 10000 * 0.7; // 70% LTV 가정
@@ -194,60 +224,84 @@ export default function PropertyDetailScreen() {
           </View>
 
           {/* 상세 정보 칩 */}
-          <View style={styles.section}>
-            <View style={styles.chipRow}>
-              <View style={styles.chip}>
-                <Text style={styles.chipLabel}>전용면적</Text>
-                <Text style={styles.chipValue}>{property.exclusiveArea.toFixed(1)}㎡</Text>
-              </View>
-              <View style={styles.chip}>
-                <Text style={styles.chipLabel}>층수</Text>
-                <Text style={styles.chipValue}>{property.floor}층</Text>
-              </View>
-              <View style={styles.chip}>
-                <Text style={styles.chipLabel}>주차</Text>
-                <Text style={styles.chipValue}>{property.parkingRatio}%</Text>
+          {(property.exclusiveArea || property.floor || property.parkingRatio) && (
+            <View style={styles.section}>
+              <View style={styles.chipRow}>
+                {property.exclusiveArea && (
+                  <View style={styles.chip}>
+                    <Text style={styles.chipLabel}>전용면적</Text>
+                    <Text style={styles.chipValue}>{property.exclusiveArea.toFixed(1)}㎡</Text>
+                  </View>
+                )}
+                {property.floor && (
+                  <View style={styles.chip}>
+                    <Text style={styles.chipLabel}>층수</Text>
+                    <Text style={styles.chipValue}>{property.floor}층</Text>
+                  </View>
+                )}
+                {property.parkingRatio && (
+                  <View style={styles.chip}>
+                    <Text style={styles.chipLabel}>주차</Text>
+                    <Text style={styles.chipValue}>
+                      {property.parkingRatio < 10
+                        ? (property.parkingRatio * 100).toFixed(0)
+                        : property.parkingRatio.toFixed(0)}%
+                    </Text>
+                  </View>
+                )}
               </View>
             </View>
-          </View>
+          )}
 
           {/* 건물 정보 */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>건물 정보</Text>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>건설사</Text>
-              <Text style={styles.infoValue}>{property.constructor}</Text>
+          {(property.builder || property.completionYear || property.households || property.totalFloors) && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>건물 정보</Text>
+              {property.builder && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>건설사</Text>
+                  <Text style={styles.infoValue}>{property.builder}</Text>
+                </View>
+              )}
+              {property.completionYear && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>준공년도</Text>
+                  <Text style={styles.infoValue}>{property.completionYear}년</Text>
+                </View>
+              )}
+              {property.households && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>총 세대수</Text>
+                  <Text style={styles.infoValue}>{property.households}세대</Text>
+                </View>
+              )}
+              {property.totalFloors && (
+                <View style={styles.infoRow}>
+                  <Text style={styles.infoLabel}>총 층수</Text>
+                  <Text style={styles.infoValue}>지상 {property.totalFloors}층</Text>
+                </View>
+              )}
             </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>준공년도</Text>
-              <Text style={styles.infoValue}>{property.completionYear}년</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>총 세대수</Text>
-              <Text style={styles.infoValue}>{property.households}세대</Text>
-            </View>
-            <View style={styles.infoRow}>
-              <Text style={styles.infoLabel}>총 층수</Text>
-              <Text style={styles.infoValue}>지상 {property.totalFloors}층</Text>
-            </View>
-          </View>
+          )}
 
           {/* 주변 인프라 */}
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>주변 인프라</Text>
-            {property.infrastructures.map((infra, idx) => (
-              <View key={idx} style={styles.infraRow}>
-                <Text style={styles.infraIcon}>{getInfraIcon(infra.category)}</Text>
-                <View style={styles.infraInfo}>
-                  <Text style={styles.infraName}>{infra.placeName}</Text>
-                  <Text style={styles.infraDistance}>도보 {infra.distance}m</Text>
+          {property.infrastructures && property.infrastructures.length > 0 && (
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>주변 인프라</Text>
+              {property.infrastructures.map((infra, idx) => (
+                <View key={idx} style={styles.infraRow}>
+                  <Text style={styles.infraIcon}>{getInfraIcon(infra.category)}</Text>
+                  <View style={styles.infraInfo}>
+                    <Text style={styles.infraName}>{infra.placeName}</Text>
+                    <Text style={styles.infraDistance}>도보 {infra.distance}m</Text>
+                  </View>
                 </View>
-              </View>
-            ))}
-          </View>
+              ))}
+            </View>
+          )}
 
           {/* 대출 정보 */}
-          {financeData && (
+          {financeData && property.price && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>예상 대출 정보</Text>
               <View style={styles.loanCard}>

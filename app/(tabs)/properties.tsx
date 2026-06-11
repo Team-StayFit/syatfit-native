@@ -204,7 +204,12 @@ function PropertyRow({ item }: { item: any }) {
     <TouchableOpacity
       style={styles.propRow}
       activeOpacity={0.85}
-      onPress={() => router.push(`/property/${item.propertyId}`)}
+      onPress={() =>
+        router.push({
+          pathname: `/property/${item.propertyId}`,
+          params: { propertyData: JSON.stringify(item) },
+        })
+      }
     >
       <View style={styles.propThumb}>
         <View style={styles.propTypeTag}>
@@ -230,12 +235,14 @@ function PropertyRow({ item }: { item: any }) {
         </Text>
         <Text style={styles.propPrice}>{getPriceDisplay()}</Text>
         <View style={styles.propMeta}>
-          <Text style={styles.propMetaText}>주차 {item.parkingRatio?.toFixed(0)}%</Text>
-          {item.constructor && (
-            <>
-              <View style={styles.metaDot} />
-              <Text style={styles.propMetaText}>{item.constructor}</Text>
-            </>
+          {item.parkingRatio && (
+            <Text style={styles.propMetaText}>
+              주차 {item.parkingRatio < 10 ? (item.parkingRatio * 100).toFixed(0) : item.parkingRatio.toFixed(0)}%
+            </Text>
+          )}
+          {item.builder && item.parkingRatio && <View style={styles.metaDot} />}
+          {item.builder && (
+            <Text style={styles.propMetaText}>{item.builder}</Text>
           )}
         </View>
       </View>

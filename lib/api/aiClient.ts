@@ -1,5 +1,5 @@
 // AI API 전용 클라이언트 (다른 베이스 URL 사용)
-export const AI_API_BASE_URL = 'https://stayfit-api.ngelsh.com';
+export const AI_API_BASE_URL = 'https://stayfit-api.ngelsh.com/llm';
 
 // Server-Sent Events (SSE) 스트리밍 처리 - React Native용
 export async function streamRecommendation(
