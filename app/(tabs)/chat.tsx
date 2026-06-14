@@ -8,7 +8,23 @@ import Markdown from 'react-native-markdown-display';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { streamRecommendation, streamChatMessage } from '@/lib/api/aiClient';
 import { useUserFinance } from '@/hooks/useUserFinance';
-import { parseAiMarkdown, type ChipData, type LoanCard, type PropertyCard } from '@/lib/utils/parseAiMarkdown';
+import type { UserFinanceResponse } from '@/lib/api/userFinance';
+import { parseAiMarkdown, type ChipData, type LoanCard, type PropertyCard, type SectionCard } from '@/lib/utils/parseAiMarkdown';
+
+// 재무 데이터 포맷팅 (app/(tabs)/my.tsx와 동일한 표기 규칙)
+const formatIncome = (income?: number) => {
+  if (!income) return '미입력';
+  return `${Math.floor(income / 10000)}만원`;
+};
+
+const formatAsset = (asset?: number) => {
+  if (!asset) return '0원';
+  const eok = Math.floor(asset / 100000000);
+  const man = Math.floor((asset % 100000000) / 10000);
+  if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만원`;
+  if (eok > 0) return `${eok}억원`;
+  return `${man.toLocaleString()}만원`;
+};
 
 type ChatState = 'empty' | 'streaming' | 'done';
 
@@ -293,6 +309,9 @@ export default function ChatScreen() {
                   <View style={styles.aiBubble}>
                     {displayText && parsed ? (
                       <>
+                        {(parsed.properties.length > 0 || parsed.loans.length > 0) && (
+                          <FinanceSummaryRow financeData={financeData} />
+                        )}
                         {!!parsed.text && (
                           <Markdown style={markdownStyles} rules={markdownRules}>
                             {parsed.text}
@@ -307,11 +326,15 @@ export default function ChatScreen() {
                         {parsed.loans.length > 0 && (
                           <LoanCards loans={parsed.loans} />
                         )}
+                        {parsed.sections.length > 0 && (
+                          <SectionCards sections={parsed.sections} />
+                        )}
                         {/* 구조화할 내용이 아직 하나도 없으면(스트리밍 초반) 원문을 그대로 표시 */}
                         {!parsed.text &&
                           parsed.chips.length === 0 &&
                           parsed.properties.length === 0 &&
-                          parsed.loans.length === 0 && (
+                          parsed.loans.length === 0 &&
+                          parsed.sections.length === 0 && (
                             <Markdown style={markdownStyles} rules={markdownRules}>
                               {displayText}
                             </Markdown>
@@ -363,6 +386,31 @@ function EmptyState({ onSelect }: { onSelect: (q: string) => void }) {
             <Text style={styles.suggArrow}>→</Text>
           </TouchableOpacity>
         ))}
+      </View>
+    </View>
+  );
+}
+
+// 매물/대출 추천 응답 상단에 내 재무 상황(연소득/보유자산/부채)을 표시
+function FinanceSummaryRow({ financeData }: { financeData?: UserFinanceResponse }) {
+  return (
+    <View style={styles.financeSummary}>
+      <Text style={styles.financeSummaryTitle}>내 재무 상황</Text>
+      <View style={styles.financeSummaryRow}>
+        <View style={styles.financeSummaryItem}>
+          <Text style={styles.financeSummaryVal}>{formatIncome(financeData?.annual_income)}</Text>
+          <Text style={styles.financeSummaryLbl}>연소득</Text>
+        </View>
+        <View style={styles.financeSummaryDivider} />
+        <View style={styles.financeSummaryItem}>
+          <Text style={styles.financeSummaryVal}>{formatAsset(financeData?.capital)}</Text>
+          <Text style={styles.financeSummaryLbl}>보유자산</Text>
+        </View>
+        <View style={styles.financeSummaryDivider} />
+        <View style={styles.financeSummaryItem}>
+          <Text style={styles.financeSummaryVal}>{formatAsset(financeData?.total_debt_amount)}</Text>
+          <Text style={styles.financeSummaryLbl}>부채</Text>
+        </View>
       </View>
     </View>
   );
@@ -436,6 +484,24 @@ function LoanCards({ loans }: { loans: LoanCard[] }) {
             {!!l.rate && <Text style={styles.loanRate}>{l.rate}</Text>}
             {!!l.maxAmount && <Text style={styles.loanMax}>{l.maxAmount}</Text>}
           </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// AI 응답의 "N. 종합 의견 / 유의사항" 등 그 외 번호 섹션을 제목+본문 카드로 표시
+function SectionCards({ sections }: { sections: SectionCard[] }) {
+  return (
+    <View style={styles.resultWrap}>
+      {sections.map((s, idx) => (
+        <View key={idx} style={styles.sectionCard}>
+          <Text style={styles.sectionCardTitle}>{s.title}</Text>
+          {!!s.body && (
+            <Markdown style={sectionMarkdownStyles} rules={markdownRules}>
+              {s.body}
+            </Markdown>
+          )}
         </View>
       ))}
     </View>
@@ -552,6 +618,20 @@ const styles = StyleSheet.create({
   aiText: { fontSize: 13, color: colors.navy, lineHeight: 21 },
   cursor: { fontSize: 13, color: colors.mint },
 
+  financeSummary: {
+    backgroundColor: colors.navy, borderRadius: 12,
+    padding: 12, marginBottom: 12,
+  },
+  financeSummaryTitle: {
+    fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8,
+  },
+  financeSummaryRow: { flexDirection: 'row', alignItems: 'center' },
+  financeSummaryItem: { flex: 1, alignItems: 'center' },
+  financeSummaryVal: { fontSize: 13, fontWeight: '800', color: colors.white, letterSpacing: -0.3 },
+  financeSummaryLbl: { fontSize: 9.5, color: 'rgba(255,255,255,0.55)', marginTop: 2 },
+  financeSummaryDivider: { width: 0.5, height: 24, backgroundColor: 'rgba(255,255,255,0.15)' },
+
   resultWrap: { marginTop: 12 },
   chipRow: { flexDirection: 'row', gap: 7, marginBottom: 12 },
   chipItem: {
@@ -602,6 +682,15 @@ const styles = StyleSheet.create({
   loanType: { fontSize: 9.5, color: colors.muted },
   loanRate: { fontSize: 13, fontWeight: '800', color: colors.navy, textAlign: 'right' },
   loanMax: { fontSize: 9.5, color: colors.muted, textAlign: 'right' },
+
+  sectionCard: {
+    backgroundColor: '#F8F7F3', borderWidth: 0.5, borderColor: colors.border,
+    borderRadius: 12, padding: 12, marginBottom: 7,
+  },
+  sectionCardTitle: {
+    fontSize: 11, fontWeight: '700', color: colors.muted,
+    letterSpacing: 0.3, marginBottom: 4,
+  },
 
   reasonBox: {
     backgroundColor: '#F0FAF6', borderWidth: 0.5,
@@ -729,6 +818,15 @@ const markdownStyles = StyleSheet.create({
     minWidth: 90,
     padding: 8,
   },
+});
+
+// SectionCards 본문(종합 의견/유의사항 등)용 마크다운 스타일 - aiBubble 본문보다 한 단계 작게
+const sectionMarkdownStyles = StyleSheet.create({
+  body: { fontSize: 12, color: colors.navy, lineHeight: 19 },
+  paragraph: { fontSize: 12, color: colors.navy, lineHeight: 19, marginTop: 0, marginBottom: 0 },
+  listItem: { fontSize: 12, color: colors.navy, lineHeight: 19, marginBottom: 2 },
+  strong: { fontWeight: '700', color: colors.navy },
+  em: { fontStyle: 'italic' },
 });
 
 // 표(table) 헤더/셀 텍스트 스타일 (커스텀 렌더 규칙에서 사용)

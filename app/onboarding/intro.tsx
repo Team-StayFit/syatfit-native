@@ -74,7 +74,7 @@ export default function OnboardingIntro() {
 
           <TouchableOpacity
             style={styles.btnPrimary}
-            onPress={() => router.push('/onboarding/financial-profile')}
+            onPress={() => router.push('/onboarding/login')}
             activeOpacity={0.85}
           >
             <Text style={styles.btnPrimaryText}>시작하기</Text>

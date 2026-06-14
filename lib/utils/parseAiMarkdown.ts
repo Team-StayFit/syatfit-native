@@ -22,11 +22,19 @@ export type LoanCard = {
   maxAmount?: string;
 };
 
+// 재무 요약/추천 매물/추천 대출처럼 전용 카드로 매핑되지 않는 일반 번호 섹션
+// (예: "4. 종합 의견:", "5. 유의사항:")을 위한 범용 카드
+export type SectionCard = {
+  title: string;
+  body: string;
+};
+
 export type ParsedAiResponse = {
   text: string;
   chips: ChipData[];
   properties: PropertyCard[];
   loans: LoanCard[];
+  sections: SectionCard[];
 };
 
 const TABLE_SEPARATOR_RE = /^\s*\|?\s*:?-{1,}:?\s*(\|\s*:?-{1,}:?\s*)*\|?\s*$/;
@@ -230,10 +238,9 @@ const SECTION_TITLES: { re: RegExp; kind: SectionKind }[] = [
   { re: /종합\s*의견|요약\s*의견|결론/, kind: 'summary' },
 ];
 
-const SECTION_BOUNDARY_RE = new RegExp(
-  `\\d+\\s*[.)]\\s*(?:${SECTION_TITLES.map((s) => s.re.source).join('|')})\\s*[:：]?`,
-  'g'
-);
+// "N. <제목>:" 형태의 모든 번호 섹션 경계를 찾는다 (제목 1~30자, 콜론으로 끝남).
+// 제목의 첫 글자는 숫자가 아니어야 가격 표기("1.5억" 등)와의 오인식을 줄인다.
+const GENERIC_SECTION_RE = /\d+\s*[.)]\s*(?:\*\*)?\s*([^\n:：*\d][^\n:：*]{0,29})\s*(?:\*\*)?\s*[:：]/g;
 
 function classifySectionTitle(title: string): SectionKind | null {
   for (const s of SECTION_TITLES) {
@@ -321,15 +328,21 @@ function reformatBullets(content: string): string {
 
 // "N. 재무 요약:* 소득:...* 자산:..." 처럼 줄바꿈 없이 이어지는 번호 섹션을 찾아
 // 재무 요약은 칩으로(텍스트에서 제거), 추천 매물/대출은 카드로 변환.
-// 알 수 없는 섹션(예: 종합 의견)은 글머리 기호를 줄 단위 목록으로 정리해 본문에 유지.
-function extractBulletSections(markdown: string): { text: string; properties: PropertyCard[]; loans: LoanCard[] } {
-  const matches = [...markdown.matchAll(SECTION_BOUNDARY_RE)];
+// 그 외 섹션(예: 종합 의견, 유의사항 등)은 제목+본문을 가진 범용 카드로 변환.
+function extractBulletSections(markdown: string): {
+  text: string;
+  properties: PropertyCard[];
+  loans: LoanCard[];
+  sections: SectionCard[];
+} {
+  const matches = [...markdown.matchAll(GENERIC_SECTION_RE)];
   if (matches.length === 0) {
-    return { text: markdown, properties: [], loans: [] };
+    return { text: markdown, properties: [], loans: [], sections: [] };
   }
 
   const properties: PropertyCard[] = [];
   const loans: LoanCard[] = [];
+  const sections: SectionCard[] = [];
   const parts: string[] = [];
 
   const firstStart = matches[0].index ?? 0;
@@ -343,8 +356,9 @@ function extractBulletSections(markdown: string): { text: string; properties: Pr
     const matchEnd = matchStart + m[0].length;
     const nextStart = idx + 1 < matches.length ? matches[idx + 1].index ?? markdown.length : markdown.length;
     const heading = m[0].trim();
+    const title = m[1].trim();
     const content = markdown.slice(matchEnd, nextStart);
-    const kind = classifySectionTitle(m[0]);
+    const kind = classifySectionTitle(title);
 
     if (kind === 'finance') {
       // 구매예산/LTV/DSR은 extractChips가 칩으로 추출하므로 본문에서는 생략.
@@ -380,12 +394,12 @@ function extractBulletSections(markdown: string): { text: string; properties: Pr
       continue;
     }
 
-    // 'summary' 등 그 외 섹션: 글머리 기호를 줄 단위 목록으로 정리해 본문에 유지
-    const bulletText = reformatBullets(content);
-    parts.push(`${heading}\n\n${bulletText}`);
+    // 'summary'(종합 의견 등) 또는 분류되지 않은 섹션: 글머리 기호를 줄 단위 목록으로
+    // 정리해 제목+본문을 가진 범용 카드로 변환
+    sections.push({ title, body: reformatBullets(content) });
   }
 
-  return { text: parts.join('\n\n'), properties, loans };
+  return { text: parts.join('\n\n'), properties, loans, sections };
 }
 
 export function parseAiMarkdown(markdown: string): ParsedAiResponse {
@@ -402,5 +416,6 @@ export function parseAiMarkdown(markdown: string): ParsedAiResponse {
     chips,
     properties: [...bulletResult.properties, ...tableResult.properties],
     loans: [...bulletResult.loans, ...tableResult.loans],
+    sections: bulletResult.sections,
   };
 }

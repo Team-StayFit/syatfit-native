@@ -4,11 +4,9 @@ import {
   SafeAreaView, TextInput, KeyboardAvoidingView, Platform, Alert,
 } from 'react-native';
 import { router } from 'expo-router';
-import { useAtom } from 'jotai';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { useLogin } from '@/hooks/useAuth';
-import { useUpdateUserFinance } from '@/hooks/useUserFinance';
-import { financialProfileAtom } from '@/atoms/financialProfile';
+import { getUserFinance } from '@/lib/api/userFinance';
 
 export default function Login() {
   const [showEmailLogin, setShowEmailLogin] = useState(false);
@@ -16,8 +14,24 @@ export default function Login() {
   const [password, setPassword] = useState('');
 
   const { mutate: loginMutation, isPending } = useLogin();
-  const { mutateAsync: saveFinance } = useUpdateUserFinance();
-  const [profile, setProfile] = useAtom(financialProfileAtom);
+
+  // 로그인 직후 재무 정보 입력 여부로 최초 로그인인지 판단해 다음 화면을 결정
+  const goToNextScreen = async () => {
+    try {
+      const finance = await getUserFinance();
+      const hasFinanceData =
+        finance.annual_income > 0 || finance.capital > 0 || finance.total_debt_amount > 0;
+
+      if (hasFinanceData) {
+        router.replace('/(tabs)');
+      } else {
+        router.replace('/onboarding/financial-profile');
+      }
+    } catch (error) {
+      // 재무 정보가 아직 없는 최초 로그인 사용자
+      router.replace('/onboarding/financial-profile');
+    }
+  };
 
   const handleEmailLogin = async () => {
     if (!email || !password) {
@@ -32,18 +46,7 @@ export default function Login() {
           // 토큰 저장이 완료될 때까지 잠시 대기
           await new Promise(resolve => setTimeout(resolve, 100));
 
-          // 온보딩에서 입력해둔 재무 정보가 있으면 로그인 직후(토큰 발급 후) 저장
-          if (profile.pendingFinance) {
-            try {
-              await saveFinance(profile.pendingFinance);
-              setProfile((prev) => ({ ...prev, pendingFinance: undefined }));
-            } catch (error) {
-              console.log('재무 정보 저장 실패:', error);
-            }
-          }
-
-          // 성공 시 메인 화면으로
-          router.replace('/(tabs)');
+          await goToNextScreen();
         },
         onError: (error: any) => {
           console.error('로그인 실패:', error);

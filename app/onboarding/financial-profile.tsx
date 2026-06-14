@@ -6,12 +6,14 @@ import {
 import { router } from 'expo-router';
 import { useAtom } from 'jotai';
 import { financialProfileAtom } from '@/atoms/financialProfile';
+import { useUpdateUserFinance } from '@/hooks/useUserFinance';
 import { colors, radius, spacing } from '@/constants/tokens';
 
 const REGIONS = ['서울', '경기', '인천', '부산', '대구', '기타'];
 
 export default function FinancialProfile() {
   const [, setProfile] = useAtom(financialProfileAtom);
+  const { mutateAsync: saveFinance, isPending } = useUpdateUserFinance();
   const [selectedRegions, setSelectedRegions] = useState<string[]>(['서울', '경기']);
 
   // 입력 필드 상태
@@ -28,30 +30,36 @@ export default function FinancialProfile() {
     );
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     // 유효성 검증
     if (!annualIncome || !capital) {
       Alert.alert('알림', '연소득과 보유 자산은 필수 입력 항목입니다.');
       return;
     }
 
-    // 로그인 전이라 인증 토큰이 없으므로 여기서는 API 호출 없이 임시 저장만 한다.
-    // 로그인 성공 직후(useLogin onSuccess)에 PATCH /users/me/finance 로 전송된다.
-    setProfile({
+    setProfile((prev) => ({
+      ...prev,
       income: Number(annualIncome) / 10000,
       assets: Number(capital) / 10000,
       debt: Number(totalDebt) / 10000,
       regions: selectedRegions,
-      pendingFinance: {
+    }));
+
+    // 로그인 직후(토큰 발급 상태)이므로 바로 재무 정보를 저장한다.
+    try {
+      await saveFinance({
         annual_income: Number(annualIncome),
         capital: Number(capital),
         total_debt_amount: Number(totalDebt) || 0,
         monthly_repayment: 0, // 월 상환액은 나중에 추가
         is_home_owner: isHomeOwner,
-      },
-    });
+      });
 
-    router.push('/onboarding/login');
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.log('재무 정보 저장 실패:', error);
+      Alert.alert('오류', '재무 정보를 저장하지 못했습니다. 다시 시도해주세요.');
+    }
   };
 
   return (
@@ -65,7 +73,6 @@ export default function FinancialProfile() {
         <View style={styles.progressRow}>
           <View style={[styles.progressBar, styles.done]} />
           <View style={[styles.progressBar, styles.active]} />
-          <View style={styles.progressBar} />
         </View>
 
         <Text style={styles.title}>재무 정보를{'\n'}알려주세요</Text>
@@ -140,11 +147,12 @@ export default function FinancialProfile() {
         </View>
 
         <TouchableOpacity
-          style={styles.btnPrimary}
+          style={[styles.btnPrimary, isPending && styles.btnDisabled]}
           onPress={handleNext}
+          disabled={isPending}
           activeOpacity={0.85}
         >
-          <Text style={styles.btnPrimaryText}>다음 단계</Text>
+          <Text style={styles.btnPrimaryText}>{isPending ? '저장 중...' : '완료'}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -236,5 +244,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 24,
   },
+  btnDisabled: { opacity: 0.6 },
   btnPrimaryText: { fontSize: 16, fontWeight: '700', color: colors.white, letterSpacing: -0.3 },
 });
