@@ -8,7 +8,9 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { useLoanSearch } from '@/hooks/useLoan';
 import { useLoanSimulation } from '@/hooks/useSimulation';
+import { useUserFinance } from '@/hooks/useUserFinance';
 import { LoanOption, LoanProduct } from '@/lib/api/loan';
+import { calculateLoanSimulationClientSide } from '@/lib/utils/loanSimulation';
 
 const RATE_TYPE_FILTERS = [
   { label: '전체', value: undefined },
@@ -72,6 +74,11 @@ export default function LoanSearchScreen() {
   });
 
   const { mutate: simulate, data: simulationResult, isPending: isSimulating, reset: resetSimulation } = useLoanSimulation();
+  const { data: financeData } = useUserFinance();
+
+  // AI 채팅 추천 매물 등 실제 propertyId가 없는 합성 데이터인지 확인
+  const numericPropertyId = Number(propertyId);
+  const hasRealPropertyId = Number.isFinite(numericPropertyId);
 
   const [activeKey, setActiveKey] = useState<string | null>(null);
 
@@ -86,8 +93,15 @@ export default function LoanSearchScreen() {
     }
 
     setActiveKey(key);
+
+    // 실제 propertyId가 없으면 (AI 추천 매물 등) 백엔드 호출 없이 프론트엔드 추정치만 표시
+    if (!hasRealPropertyId) {
+      resetSimulation();
+      return;
+    }
+
     simulate(
-      { propertyId: Number(propertyId), optionId: option.optionId, type: simulationType },
+      { propertyId: numericPropertyId, optionId: option.optionId, type: simulationType },
       {
         onError: (err) => {
           console.error('대출 시뮬레이션 실패:', err);
@@ -212,60 +226,79 @@ export default function LoanSearchScreen() {
                         {/* 시뮬레이션 결과 */}
                         {isActive && (
                           <View style={styles.simResultCard}>
-                            {isSimulating ? (
+                            {hasRealPropertyId && isSimulating ? (
                               <View style={styles.simLoading}>
                                 <ActivityIndicator size="small" color={colors.navy} />
                                 <Text style={styles.simLoadingText}>시뮬레이션 계산 중...</Text>
                               </View>
-                            ) : simulationResult ? (
-                              <>
-                                <View style={[
-                                  styles.possibleBadge,
-                                  simulationResult.isPossible ? styles.possibleOn : styles.possibleOff,
-                                ]}>
-                                  <Text style={[
-                                    styles.possibleText,
-                                    simulationResult.isPossible ? styles.possibleTextOn : styles.possibleTextOff,
-                                  ]}>
-                                    {simulationResult.isPossible ? '✓ 대출로 자금 조달 가능' : '⚠ 자금 부족'}
-                                  </Text>
-                                </View>
+                            ) : (() => {
+                              // 실제 propertyId가 없거나(AI 추천 매물), 백엔드 시뮬레이션이 아직
+                              // 미구현(0/null)인 경우 프론트엔드에서 대략적으로 계산
+                              const isStub = !hasRealPropertyId || !simulationResult || !simulationResult.analysis;
+                              const result = isStub
+                                ? calculateLoanSimulationClientSide({
+                                    priceManWon: property?.price || 0,
+                                    type: simulationType,
+                                    option,
+                                    financeData,
+                                  })
+                                : simulationResult;
 
-                                <View style={styles.simRow}>
-                                  <Text style={styles.simLabel}>최종 대출 한도</Text>
-                                  <Text style={styles.simValue}>{formatWon(simulationResult.finalLoanLimit)}</Text>
-                                </View>
-                                <View style={styles.simRow}>
-                                  <Text style={styles.simLabel}>필요 자금</Text>
-                                  <Text style={styles.simValue}>{formatWon(simulationResult.neededAmount)}</Text>
-                                </View>
-                                <View style={styles.simRow}>
-                                  <Text style={styles.simLabel}>
-                                    {simulationResult.gapAmount >= 0 ? '부족 금액' : '여유 자금'}
-                                  </Text>
-                                  <Text style={[styles.simValue, simulationResult.gapAmount > 0 && { color: colors.warn }]}>
-                                    {formatWon(Math.abs(simulationResult.gapAmount))}
-                                  </Text>
-                                </View>
-                                <View style={styles.simRow}>
-                                  <Text style={styles.simLabel}>예상 월 상환액</Text>
-                                  <Text style={styles.simValue}>{formatWon(simulationResult.monthlyRepayment)}</Text>
-                                </View>
-                                <View style={styles.simDivider} />
-                                <View style={styles.simRow}>
-                                  <Text style={styles.simLabelSmall}>적용 LTV</Text>
-                                  <Text style={styles.simValueSmall}>{simulationResult.analysis?.appliedLtv}%</Text>
-                                </View>
-                                <View style={styles.simRow}>
-                                  <Text style={styles.simLabelSmall}>DSR</Text>
-                                  <Text style={styles.simValueSmall}>{simulationResult.analysis?.dsrValue}%</Text>
-                                </View>
-                                <View style={styles.simRow}>
-                                  <Text style={styles.simLabelSmall}>한도 기준</Text>
-                                  <Text style={styles.simValueSmall}>{simulationResult.analysis?.limitSource}</Text>
-                                </View>
-                              </>
-                            ) : null}
+                              return (
+                                <>
+                                  {isStub && (
+                                    <Text style={styles.estimateNotice}>
+                                      * 서버 계산 준비 중 - 아래는 입력 정보 기반 추정치입니다
+                                    </Text>
+                                  )}
+                                  <View style={[
+                                    styles.possibleBadge,
+                                    result.isPossible ? styles.possibleOn : styles.possibleOff,
+                                  ]}>
+                                    <Text style={[
+                                      styles.possibleText,
+                                      result.isPossible ? styles.possibleTextOn : styles.possibleTextOff,
+                                    ]}>
+                                      {result.isPossible ? '✓ 대출로 자금 조달 가능' : '⚠ 자금 부족'}
+                                    </Text>
+                                  </View>
+
+                                  <View style={styles.simRow}>
+                                    <Text style={styles.simLabel}>최종 대출 한도</Text>
+                                    <Text style={styles.simValue}>{formatWon(result.finalLoanLimit)}</Text>
+                                  </View>
+                                  <View style={styles.simRow}>
+                                    <Text style={styles.simLabel}>필요 자금</Text>
+                                    <Text style={styles.simValue}>{formatWon(result.neededAmount)}</Text>
+                                  </View>
+                                  <View style={styles.simRow}>
+                                    <Text style={styles.simLabel}>
+                                      {result.gapAmount >= 0 ? '부족 금액' : '여유 자금'}
+                                    </Text>
+                                    <Text style={[styles.simValue, result.gapAmount > 0 && { color: colors.warn }]}>
+                                      {formatWon(Math.abs(result.gapAmount))}
+                                    </Text>
+                                  </View>
+                                  <View style={styles.simRow}>
+                                    <Text style={styles.simLabel}>예상 월 상환액</Text>
+                                    <Text style={styles.simValue}>{formatWon(result.monthlyRepayment)}</Text>
+                                  </View>
+                                  <View style={styles.simDivider} />
+                                  <View style={styles.simRow}>
+                                    <Text style={styles.simLabelSmall}>적용 LTV</Text>
+                                    <Text style={styles.simValueSmall}>{result.analysis?.appliedLtv}%</Text>
+                                  </View>
+                                  <View style={styles.simRow}>
+                                    <Text style={styles.simLabelSmall}>DSR</Text>
+                                    <Text style={styles.simValueSmall}>{result.analysis?.dsrValue}%</Text>
+                                  </View>
+                                  <View style={styles.simRow}>
+                                    <Text style={styles.simLabelSmall}>한도 기준</Text>
+                                    <Text style={styles.simValueSmall}>{result.analysis?.limitSource}</Text>
+                                  </View>
+                                </>
+                              );
+                            })()}
                           </View>
                         )}
                       </View>
@@ -367,6 +400,7 @@ const styles = StyleSheet.create({
   },
   simLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 8 },
   simLoadingText: { fontSize: 12, color: 'rgba(255,255,255,0.7)' },
+  estimateNotice: { fontSize: 10.5, color: 'rgba(255,255,255,0.45)', marginBottom: 8 },
   possibleBadge: {
     alignSelf: 'flex-start',
     borderRadius: 8, paddingHorizontal: 10, paddingVertical: 5,

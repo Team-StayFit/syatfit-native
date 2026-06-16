@@ -218,7 +218,13 @@ function extractTables(markdown: string): { text: string; properties: PropertyCa
         i = j - 1;
         continue;
       }
-      // 알 수 없는 형식이거나 데이터 행이 없는 표는 그대로 마크다운으로 출력
+      // 데이터 행이 없는 표(헤더+구분선만)는 마크다운으로 그대로 출력하면
+      // 빈 네이비색 헤더 바만 렌더링되어 혼란을 주므로 통째로 제거한다
+      if (rows.length === 0) {
+        i = j - 1;
+        continue;
+      }
+      // 알 수 없는 형식의 표는 그대로 마크다운으로 출력
     }
 
     outputLines.push(line);
@@ -402,6 +408,22 @@ function extractBulletSections(markdown: string): {
   return { text: parts.join('\n\n'), properties, loans, sections };
 }
 
+// "N. 추천 매물:" 처럼 표 형태의 본문이 카드로 모두 추출되고 제목만 덩그러니 남은
+// 블록을 제거한다. (재무 요약/종합 의견 등은 별도 로직에서 이미 처리되므로
+// 매물/대출 섹션 제목만 대상으로 함)
+const ORPHAN_HEADING_RE = /^\d+\s*[.)]\s*(?:\*\*)?\s*([^\n:：*]{1,30})\s*(?:\*\*)?\s*[:：]$/;
+
+function removeOrphanSectionHeadings(text: string): string {
+  const blocks = text.split(/\n{2,}/);
+  const filtered = blocks.filter((block) => {
+    const m = block.trim().match(ORPHAN_HEADING_RE);
+    if (!m) return true;
+    const kind = classifySectionTitle(m[1].trim());
+    return kind !== 'property' && kind !== 'loan';
+  });
+  return filtered.join('\n\n');
+}
+
 export function parseAiMarkdown(markdown: string): ParsedAiResponse {
   const chips = extractChips(markdown);
 
@@ -409,7 +431,7 @@ export function parseAiMarkdown(markdown: string): ParsedAiResponse {
   const stripped = stripFinancialSummarySection(bulletResult.text);
   const tableResult = extractTables(stripped);
 
-  const text = tableResult.text.replace(/\n{3,}/g, '\n\n').trim();
+  const text = removeOrphanSectionHeadings(tableResult.text).replace(/\n{3,}/g, '\n\n').trim();
 
   return {
     text,

@@ -10,6 +10,7 @@ import { useUserFinance } from '@/hooks/useUserFinance';
 import { usePropertyDetail } from '@/hooks/useProperty';
 import { useCheckFavorite, useToggleFavorite } from '@/hooks/useFavorite';
 import { addRecentProperty } from '@/lib/utils/recentProperties';
+import PropertyImagePlaceholder from '@/components/PropertyImagePlaceholder';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -22,6 +23,10 @@ export default function PropertyDetailScreen() {
   const passedPropertyData = propertyDataParam
     ? JSON.parse(propertyDataParam as string)
     : null;
+
+  // AI 채팅 추천 매물 등 실제 propertyId가 없는 합성 데이터인지 확인
+  const numericId = Number(id);
+  const hasRealPropertyId = Number.isFinite(numericId);
 
   // 재무 정보 가져오기 (DSR 계산용)
   const { data: financeData } = useUserFinance();
@@ -143,10 +148,10 @@ export default function PropertyDetailScreen() {
 
   // 찜 토글 핸들러
   const handleToggleFavorite = () => {
-    if (isTogglingFavorite) return;
+    if (isTogglingFavorite || !hasRealPropertyId) return;
 
     toggleFavorite(
-      { propertyId: Number(id), isFavorite },
+      { propertyId: numericId, isFavorite },
       {
         onSuccess: () => {
           // 성공 시 아무것도 안해도 됨 (자동으로 캐시 업데이트)
@@ -181,24 +186,24 @@ export default function PropertyDetailScreen() {
         >
           <Text style={styles.backIcon}>←</Text>
         </TouchableOpacity>
-        <TouchableOpacity
-          style={styles.favoriteBtn}
-          onPress={handleToggleFavorite}
-          activeOpacity={0.7}
-          disabled={isTogglingFavorite}
-        >
-          <Text style={styles.favoriteIcon}>
-            {isTogglingFavorite ? '⏳' : isFavorite ? '❤️' : '🤍'}
-          </Text>
-        </TouchableOpacity>
+        {hasRealPropertyId && (
+          <TouchableOpacity
+            style={styles.favoriteBtn}
+            onPress={handleToggleFavorite}
+            activeOpacity={0.7}
+            disabled={isTogglingFavorite}
+          >
+            <Text style={styles.favoriteIcon}>
+              {isTogglingFavorite ? '⏳' : isFavorite ? '❤️' : '🤍'}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false}>
         {/* 이미지 (현재는 placeholder) */}
         <View style={styles.imageContainer}>
-          <View style={styles.imagePlaceholder}>
-            <Text style={{ fontSize: 48, opacity: 0.3 }}>🏠</Text>
-          </View>
+          <PropertyImagePlaceholder size={72} />
           <View style={styles.imageOverlay}>
             <View style={styles.typeTag}>
               <Text style={styles.typeTagText}>{getTypeLabel(property.transactionType)}</Text>
@@ -408,13 +413,6 @@ const styles = StyleSheet.create({
     width: SCREEN_WIDTH,
     height: SCREEN_WIDTH * 0.75,
     position: 'relative',
-  },
-  imagePlaceholder: {
-    width: '100%',
-    height: '100%',
-    backgroundColor: '#DDE3EF',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   imageOverlay: {
     position: 'absolute',

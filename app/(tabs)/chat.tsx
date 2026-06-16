@@ -4,12 +4,14 @@ import {
   TouchableOpacity, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import Markdown from 'react-native-markdown-display';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { streamRecommendation, streamChatMessage } from '@/lib/api/aiClient';
 import { useUserFinance } from '@/hooks/useUserFinance';
 import type { UserFinanceResponse } from '@/lib/api/userFinance';
 import { parseAiMarkdown, type ChipData, type LoanCard, type PropertyCard, type SectionCard } from '@/lib/utils/parseAiMarkdown';
+import PropertyImagePlaceholder from '@/components/PropertyImagePlaceholder';
 
 // 재무 데이터 포맷팅 (app/(tabs)/my.tsx와 동일한 표기 규칙)
 const formatIncome = (income?: number) => {
@@ -24,6 +26,44 @@ const formatAsset = (asset?: number) => {
   if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만원`;
   if (eok > 0) return `${eok}억원`;
   return `${man.toLocaleString()}만원`;
+};
+
+// AI 추천 매물 카드의 거래 유형(매매/전세/월세) → 매물 상세 페이지 코드 매핑
+const TRANSACTION_TYPE_MAP: Record<string, string> = {
+  매매: 'TRADING',
+  전세: 'LEASE',
+  월세: 'RENT',
+};
+
+// AI 추천 매물 카드의 price 문자열(예: "38,000만 원 · 35.14㎡")에서
+// 가격(만원)과 전용면적(㎡)을 추출
+const parsePropertyPriceText = (priceText?: string) => {
+  if (!priceText) return { price: undefined, exclusiveArea: undefined };
+  const priceMatch = priceText.match(/([\d,]+)\s*만\s*원/);
+  const areaMatch = priceText.match(/([\d.]+)\s*(?:㎡|m2|m²)/i);
+  return {
+    price: priceMatch ? Number(priceMatch[1].replace(/,/g, '')) : undefined,
+    exclusiveArea: areaMatch ? Number(areaMatch[1]) : undefined,
+  };
+};
+
+// AI 추천 매물 카드를 탭하면 상세 페이지로 이동 (AI 응답에 없는 필드는 비워둠)
+const goToAiRecommendedProperty = (property: PropertyCard) => {
+  const { price, exclusiveArea } = parsePropertyPriceText(property.price);
+  router.push({
+    pathname: '/property/[id]',
+    params: {
+      id: 'ai-recommend',
+      propertyData: JSON.stringify({
+        name: property.name,
+        roadAddress: property.location || '',
+        transactionType: TRANSACTION_TYPE_MAP[property.type || ''] || 'TRADING',
+        price,
+        monthlyRent: 0,
+        exclusiveArea,
+      }),
+    },
+  });
 };
 
 type ChatState = 'empty' | 'streaming' | 'done';
@@ -329,9 +369,8 @@ export default function ChatScreen() {
                         {parsed.sections.length > 0 && (
                           <SectionCards sections={parsed.sections} />
                         )}
-                        {/* 구조화할 내용이 아직 하나도 없으면(스트리밍 초반) 원문을 그대로 표시 */}
+                        {/* 카드/칩으로 추출되지 않은 내용이 있으면(또는 스트리밍 초반) 원문을 그대로 표시 */}
                         {!parsed.text &&
-                          parsed.chips.length === 0 &&
                           parsed.properties.length === 0 &&
                           parsed.loans.length === 0 &&
                           parsed.sections.length === 0 && (
@@ -441,8 +480,14 @@ function PropertyCards({ properties }: { properties: PropertyCard[] }) {
         contentContainerStyle={styles.propScroll}
       >
         {properties.map((p, idx) => (
-          <View key={idx} style={styles.miniPropCard}>
+          <TouchableOpacity
+            key={idx}
+            style={styles.miniPropCard}
+            activeOpacity={0.85}
+            onPress={() => goToAiRecommendedProperty(p)}
+          >
             <View style={styles.miniPropImg}>
+              <PropertyImagePlaceholder size={26} style={StyleSheet.absoluteFill} />
               {!!p.type && (
                 <View style={styles.miniTag}>
                   <Text style={styles.miniTagText}>{p.type}</Text>
@@ -462,7 +507,7 @@ function PropertyCards({ properties }: { properties: PropertyCard[] }) {
               {!!p.price && <Text style={styles.miniPropPrice}>{p.price}</Text>}
               {!!p.dsr && <Text style={styles.miniDsr}>DSR {p.dsr}</Text>}
             </View>
-          </View>
+          </TouchableOpacity>
         ))}
       </ScrollView>
     </View>
@@ -653,7 +698,7 @@ const styles = StyleSheet.create({
     borderRadius: 14, overflow: 'hidden',
     borderWidth: 0.5, borderColor: colors.border,
   },
-  miniPropImg: { height: 78, position: 'relative', backgroundColor: colors.cardBg },
+  miniPropImg: { height: 78, position: 'relative', backgroundColor: colors.cardBg, overflow: 'hidden' },
   miniTag: {
     position: 'absolute', top: 6, left: 6,
     backgroundColor: colors.navy, borderRadius: 4,
