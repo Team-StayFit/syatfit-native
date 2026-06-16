@@ -5,10 +5,13 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useSetAtom } from 'jotai';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { useMyInfo } from '@/hooks/useUser';
 import { useUserFinance } from '@/hooks/useUserFinance';
 import { clearAuthData } from '@/lib/utils/tokenStorage';
+import { queryClient } from '@/lib/queryClient';
+import { financialProfileAtom } from '@/atoms/financialProfile';
 import { useFavoriteProperties, useToggleFavorite } from '@/hooks/useFavorite';
 
 const SETTINGS = [
@@ -89,6 +92,8 @@ export default function MyScreen() {
 
   const metrics = calculateFinancialMetrics();
 
+  const setFinancialProfile = useSetAtom(financialProfileAtom);
+
   // 로그아웃 핸들러
   const handleLogout = async () => {
     Alert.alert(
@@ -101,6 +106,10 @@ export default function MyScreen() {
           style: 'destructive',
           onPress: async () => {
             await clearAuthData();
+            // 이전 사용자의 캐시 데이터(내 정보, 재무 정보, 찜 목록 등)가
+            // 다음 로그인 사용자에게 잠깐이라도 보이지 않도록 초기화
+            queryClient.clear();
+            setFinancialProfile({ income: 0, assets: 0, debt: 0, regions: [], pendingFinance: undefined });
             router.replace('/onboarding/login');
           },
         },
@@ -131,7 +140,11 @@ export default function MyScreen() {
                 </>
               )}
             </View>
-            <TouchableOpacity style={styles.editBtn}>
+            <TouchableOpacity
+              style={styles.editBtn}
+              onPress={() => router.push('/profile/edit')}
+              activeOpacity={0.7}
+            >
               <Text style={styles.editBtnText}>편집</Text>
             </TouchableOpacity>
           </View>

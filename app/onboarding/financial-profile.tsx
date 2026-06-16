@@ -6,13 +6,14 @@ import {
 import { router } from 'expo-router';
 import { useAtom } from 'jotai';
 import { financialProfileAtom } from '@/atoms/financialProfile';
-import { colors, radius, spacing } from '@/constants/tokens';
 import { useUpdateUserFinance } from '@/hooks/useUserFinance';
+import { colors, radius, spacing } from '@/constants/tokens';
 
 const REGIONS = ['서울', '경기', '인천', '부산', '대구', '기타'];
 
 export default function FinancialProfile() {
   const [, setProfile] = useAtom(financialProfileAtom);
+  const { mutateAsync: saveFinance, isPending } = useUpdateUserFinance();
   const [selectedRegions, setSelectedRegions] = useState<string[]>(['서울', '경기']);
 
   // 입력 필드 상태
@@ -20,9 +21,6 @@ export default function FinancialProfile() {
   const [capital, setCapital] = useState('120000000'); // 1억 2천만원
   const [totalDebt, setTotalDebt] = useState('35000000'); // 3500만원
   const [isHomeOwner, setIsHomeOwner] = useState(false);
-
-  // API mutation
-  const { mutate: saveFinance, isPending } = useUpdateUserFinance();
 
   const toggleRegion = (r: string) => {
     setSelectedRegions((prev) =>
@@ -32,52 +30,36 @@ export default function FinancialProfile() {
     );
   };
 
-  const handleNext = () => {
+  const handleNext = async () => {
     // 유효성 검증
     if (!annualIncome || !capital) {
       Alert.alert('알림', '연소득과 보유 자산은 필수 입력 항목입니다.');
       return;
     }
 
-    // API 저장 (인증이 필요할 수 있음 - 실패해도 계속 진행)
-    saveFinance(
-      {
+    setProfile((prev) => ({
+      ...prev,
+      income: Number(annualIncome) / 10000,
+      assets: Number(capital) / 10000,
+      debt: Number(totalDebt) / 10000,
+      regions: selectedRegions,
+    }));
+
+    // 로그인 직후(토큰 발급 상태)이므로 바로 재무 정보를 저장한다.
+    try {
+      await saveFinance({
         annual_income: Number(annualIncome),
         capital: Number(capital),
         total_debt_amount: Number(totalDebt) || 0,
         monthly_repayment: 0, // 월 상환액은 나중에 추가
         is_home_owner: isHomeOwner,
-      },
-      {
-        onSuccess: () => {
-          console.log('재무 정보 저장 성공');
-        },
-        onError: (error) => {
-          console.log('재무 정보 저장 실패:', error);
+      });
 
-          // 서버 연결 에러인 경우
-          if ((error as any).isServerError) {
-            const retrySeconds = (error as any).retryAfter || 120;
-            Alert.alert(
-              '서버 연결 오류',
-              `백엔드 서버가 일시적으로 연결 불가 상태입니다.\n약 ${retrySeconds}초 후에 다시 시도해주세요.`,
-              [{ text: '확인' }]
-            );
-          }
-          // 에러가 나도 계속 진행 (로그인 후 다시 입력할 수 있음)
-        },
-      }
-    );
-
-    // 로컬 상태 저장
-    setProfile({
-      income: Number(annualIncome) / 10000,
-      assets: Number(capital) / 10000,
-      debt: Number(totalDebt) / 10000,
-      regions: selectedRegions,
-    });
-
-    router.push('/onboarding/login');
+      router.replace('/(tabs)');
+    } catch (error) {
+      console.log('재무 정보 저장 실패:', error);
+      Alert.alert('오류', '재무 정보를 저장하지 못했습니다. 다시 시도해주세요.');
+    }
   };
 
   return (
@@ -91,7 +73,6 @@ export default function FinancialProfile() {
         <View style={styles.progressRow}>
           <View style={[styles.progressBar, styles.done]} />
           <View style={[styles.progressBar, styles.active]} />
-          <View style={styles.progressBar} />
         </View>
 
         <Text style={styles.title}>재무 정보를{'\n'}알려주세요</Text>
@@ -166,14 +147,12 @@ export default function FinancialProfile() {
         </View>
 
         <TouchableOpacity
-          style={styles.btnPrimary}
+          style={[styles.btnPrimary, isPending && styles.btnDisabled]}
           onPress={handleNext}
-          activeOpacity={0.85}
           disabled={isPending}
+          activeOpacity={0.85}
         >
-          <Text style={styles.btnPrimaryText}>
-            {isPending ? '저장 중...' : '다음 단계'}
-          </Text>
+          <Text style={styles.btnPrimaryText}>{isPending ? '저장 중...' : '완료'}</Text>
         </TouchableOpacity>
       </ScrollView>
     </SafeAreaView>
@@ -265,5 +244,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 24,
   },
+  btnDisabled: { opacity: 0.6 },
   btnPrimaryText: { fontSize: 16, fontWeight: '700', color: colors.white, letterSpacing: -0.3 },
 });

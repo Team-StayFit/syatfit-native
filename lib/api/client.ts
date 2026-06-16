@@ -21,8 +21,9 @@ apiClient.interceptors.request.use(
     const isLoginAPI = config.url === '/auth/login';
     const isRefreshAPI = config.url === '/auth/refresh';
     const isSignupAPI = config.url === '/users' && config.method === 'post';
+    const isUsernameCheckAPI = config.url === '/users/exists';
 
-    const needsAuth = !isLoginAPI && !isRefreshAPI && !isSignupAPI;
+    const needsAuth = !isLoginAPI && !isRefreshAPI && !isSignupAPI && !isUsernameCheckAPI;
 
     if (needsAuth) {
       const token = await getAccessToken();

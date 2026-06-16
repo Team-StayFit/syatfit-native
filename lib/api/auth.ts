@@ -35,6 +35,12 @@ export const signup = async (data: SignupRequest): Promise<SignupResponse> => {
   return response as any;
 };
 
+// 아이디(username) 중복 확인
+export const checkUsernameExists = async (username: string): Promise<boolean> => {
+  const response = await apiClient.post<boolean>('/users/exists', { username });
+  return response as any;
+};
+
 // 로그인
 export const login = async (data: LoginRequest): Promise<LoginResponse> => {
   const response = await apiClient.post<LoginResponse>('/auth/login', data);

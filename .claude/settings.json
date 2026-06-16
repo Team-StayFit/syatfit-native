@@ -6,7 +6,16 @@
       "Read(//c/Users/user/OneDrive/바탕 화면/stayfit_temp/**)",
       "Bash(rm -rf \"c:/Users/user/OneDrive/바탕 화면/stayfit_temp\")",
       "PowerShell(Get-ChildItem -Path \"c:\\\\Users\\\\user\\\\OneDrive\\\\바탕 화면\\\\stayfit\" -Depth 1 | Where-Object { $_.PSIsContainer -and $_.Name -notmatch 'node_modules|\\\\.git|\\\\.expo' } | Select-Object Name)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(Get-Content \"C:\\\\Users\\\\user\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\c--Users-user-OneDrive-------stayfit\\\\4536f5f1-9d12-4454-929b-23725b9decba\\\\tasks\\\\bysvmb4bd.output\")",
+      "Bash(netstat -ano)",
+      "Bash(findstr \":808\")",
+      "Bash(findstr \"LISTENING\")",
+      "Bash(taskkill /PID 28880 /F)",
+      "PowerShell(Get-NetTCPConnection -LocalPort 8081,8082,8083 -ErrorAction SilentlyContinue)",
+      "Bash(npm audit *)",
+      "WebFetch(domain:stayfit-api.ngelsh.com)",
+      "Bash(npx tsc *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\user\\OneDrive\\바탕 화면\\stayfit_temp"

@@ -4,10 +4,67 @@ import {
   TouchableOpacity, TextInput, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import Markdown from 'react-native-markdown-display';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { streamRecommendation, streamChatMessage } from '@/lib/api/aiClient';
 import { useUserFinance } from '@/hooks/useUserFinance';
+import type { UserFinanceResponse } from '@/lib/api/userFinance';
+import { parseAiMarkdown, type ChipData, type LoanCard, type PropertyCard, type SectionCard } from '@/lib/utils/parseAiMarkdown';
+import PropertyImagePlaceholder from '@/components/PropertyImagePlaceholder';
+
+// 재무 데이터 포맷팅 (app/(tabs)/my.tsx와 동일한 표기 규칙)
+const formatIncome = (income?: number) => {
+  if (!income) return '미입력';
+  return `${Math.floor(income / 10000)}만원`;
+};
+
+const formatAsset = (asset?: number) => {
+  if (!asset) return '0원';
+  const eok = Math.floor(asset / 100000000);
+  const man = Math.floor((asset % 100000000) / 10000);
+  if (eok > 0 && man > 0) return `${eok}억 ${man.toLocaleString()}만원`;
+  if (eok > 0) return `${eok}억원`;
+  return `${man.toLocaleString()}만원`;
+};
+
+// AI 추천 매물 카드의 거래 유형(매매/전세/월세) → 매물 상세 페이지 코드 매핑
+const TRANSACTION_TYPE_MAP: Record<string, string> = {
+  매매: 'TRADING',
+  전세: 'LEASE',
+  월세: 'RENT',
+};
+
+// AI 추천 매물 카드의 price 문자열(예: "38,000만 원 · 35.14㎡")에서
+// 가격(만원)과 전용면적(㎡)을 추출
+const parsePropertyPriceText = (priceText?: string) => {
+  if (!priceText) return { price: undefined, exclusiveArea: undefined };
+  const priceMatch = priceText.match(/([\d,]+)\s*만\s*원/);
+  const areaMatch = priceText.match(/([\d.]+)\s*(?:㎡|m2|m²)/i);
+  return {
+    price: priceMatch ? Number(priceMatch[1].replace(/,/g, '')) : undefined,
+    exclusiveArea: areaMatch ? Number(areaMatch[1]) : undefined,
+  };
+};
+
+// AI 추천 매물 카드를 탭하면 상세 페이지로 이동 (AI 응답에 없는 필드는 비워둠)
+const goToAiRecommendedProperty = (property: PropertyCard) => {
+  const { price, exclusiveArea } = parsePropertyPriceText(property.price);
+  router.push({
+    pathname: '/property/[id]',
+    params: {
+      id: 'ai-recommend',
+      propertyData: JSON.stringify({
+        name: property.name,
+        roadAddress: property.location || '',
+        transactionType: TRANSACTION_TYPE_MAP[property.type || ''] || 'TRADING',
+        price,
+        monthlyRent: 0,
+        exclusiveArea,
+      }),
+    },
+  });
+};
 
 type ChatState = 'empty' | 'streaming' | 'done';
 
@@ -280,6 +337,8 @@ export default function ChatScreen() {
           } else {
             // AI message
             const displayText = message.isStreaming ? streamText : message.content;
+            // 스트리밍 중에도 1./2./3. 섹션과 표를 실시간으로 칩/카드 UI로 구조화해서 보여줌
+            const parsed = displayText ? parseAiMarkdown(displayText) : null;
             return (
               <View key={message.id} style={styles.aiBubbleRow}>
                 <View style={styles.aiAvatar}>
@@ -288,11 +347,37 @@ export default function ChatScreen() {
                 <View style={styles.aiContent}>
                   <Text style={styles.aiName}>STAYFIT AI</Text>
                   <View style={styles.aiBubble}>
-                    {displayText ? (
+                    {displayText && parsed ? (
                       <>
-                        <Markdown style={markdownStyles}>
-                          {displayText}
-                        </Markdown>
+                        {(parsed.properties.length > 0 || parsed.loans.length > 0) && (
+                          <FinanceSummaryRow financeData={financeData} />
+                        )}
+                        {!!parsed.text && (
+                          <Markdown style={markdownStyles} rules={markdownRules}>
+                            {parsed.text}
+                          </Markdown>
+                        )}
+                        {parsed.chips.length > 0 && (
+                          <ChipsRow chips={parsed.chips} />
+                        )}
+                        {parsed.properties.length > 0 && (
+                          <PropertyCards properties={parsed.properties} />
+                        )}
+                        {parsed.loans.length > 0 && (
+                          <LoanCards loans={parsed.loans} />
+                        )}
+                        {parsed.sections.length > 0 && (
+                          <SectionCards sections={parsed.sections} />
+                        )}
+                        {/* 카드/칩으로 추출되지 않은 내용이 있으면(또는 스트리밍 초반) 원문을 그대로 표시 */}
+                        {!parsed.text &&
+                          parsed.properties.length === 0 &&
+                          parsed.loans.length === 0 &&
+                          parsed.sections.length === 0 && (
+                            <Markdown style={markdownStyles} rules={markdownRules}>
+                              {displayText}
+                            </Markdown>
+                          )}
                         {message.isStreaming && (
                           <Text style={styles.cursor}>|</Text>
                         )}
@@ -345,8 +430,128 @@ function EmptyState({ onSelect }: { onSelect: (q: string) => void }) {
   );
 }
 
-// LLMResultCards 컴포넌트는 향후 구조화된 응답 처리 시 사용
-// function LLMResultCards({ data }: { data: LLMResponse }) { ... }
+// 매물/대출 추천 응답 상단에 내 재무 상황(연소득/보유자산/부채)을 표시
+function FinanceSummaryRow({ financeData }: { financeData?: UserFinanceResponse }) {
+  return (
+    <View style={styles.financeSummary}>
+      <Text style={styles.financeSummaryTitle}>내 재무 상황</Text>
+      <View style={styles.financeSummaryRow}>
+        <View style={styles.financeSummaryItem}>
+          <Text style={styles.financeSummaryVal}>{formatIncome(financeData?.annual_income)}</Text>
+          <Text style={styles.financeSummaryLbl}>연소득</Text>
+        </View>
+        <View style={styles.financeSummaryDivider} />
+        <View style={styles.financeSummaryItem}>
+          <Text style={styles.financeSummaryVal}>{formatAsset(financeData?.capital)}</Text>
+          <Text style={styles.financeSummaryLbl}>보유자산</Text>
+        </View>
+        <View style={styles.financeSummaryDivider} />
+        <View style={styles.financeSummaryItem}>
+          <Text style={styles.financeSummaryVal}>{formatAsset(financeData?.total_debt_amount)}</Text>
+          <Text style={styles.financeSummaryLbl}>부채</Text>
+        </View>
+      </View>
+    </View>
+  );
+}
+
+// AI 응답에서 추출한 요약 칩 (구매예산 / LTV / DSR 등)
+function ChipsRow({ chips }: { chips: ChipData[] }) {
+  return (
+    <View style={styles.chipRow}>
+      {chips.map((chip) => (
+        <View key={chip.label} style={styles.chipItem}>
+          <Text style={styles.chipVal}>{chip.value}</Text>
+          <Text style={styles.chipLbl}>{chip.label}</Text>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// AI 응답에서 추출한 추천 매물 카드 (가로 스크롤)
+function PropertyCards({ properties }: { properties: PropertyCard[] }) {
+  return (
+    <View style={styles.resultWrap}>
+      <Text style={styles.resultSect}>추천 매물</Text>
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.propScroll}
+      >
+        {properties.map((p, idx) => (
+          <TouchableOpacity
+            key={idx}
+            style={styles.miniPropCard}
+            activeOpacity={0.85}
+            onPress={() => goToAiRecommendedProperty(p)}
+          >
+            <View style={styles.miniPropImg}>
+              <PropertyImagePlaceholder size={26} style={StyleSheet.absoluteFill} />
+              {!!p.type && (
+                <View style={styles.miniTag}>
+                  <Text style={styles.miniTagText}>{p.type}</Text>
+                </View>
+              )}
+              {!!p.fit && (
+                <View style={styles.miniFit}>
+                  <Text style={styles.miniFitText}>{p.fit}</Text>
+                </View>
+              )}
+            </View>
+            <View style={styles.miniPropBody}>
+              <Text style={styles.miniPropName} numberOfLines={1}>{p.name}</Text>
+              {!!p.location && (
+                <Text style={styles.miniPropLoc} numberOfLines={1}>{p.location}</Text>
+              )}
+              {!!p.price && <Text style={styles.miniPropPrice}>{p.price}</Text>}
+              {!!p.dsr && <Text style={styles.miniDsr}>DSR {p.dsr}</Text>}
+            </View>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+}
+
+// AI 응답에서 추출한 추천 대출 상품 목록
+function LoanCards({ loans }: { loans: LoanCard[] }) {
+  return (
+    <View style={styles.resultWrap}>
+      <Text style={styles.resultSect}>추천 대출 상품</Text>
+      {loans.map((l, idx) => (
+        <View key={idx} style={styles.loanCard}>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.loanName}>{l.name}</Text>
+            {!!l.bankInfo && <Text style={styles.loanType}>{l.bankInfo}</Text>}
+          </View>
+          <View>
+            {!!l.rate && <Text style={styles.loanRate}>{l.rate}</Text>}
+            {!!l.maxAmount && <Text style={styles.loanMax}>{l.maxAmount}</Text>}
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+// AI 응답의 "N. 종합 의견 / 유의사항" 등 그 외 번호 섹션을 제목+본문 카드로 표시
+function SectionCards({ sections }: { sections: SectionCard[] }) {
+  return (
+    <View style={styles.resultWrap}>
+      {sections.map((s, idx) => (
+        <View key={idx} style={styles.sectionCard}>
+          <Text style={styles.sectionCardTitle}>{s.title}</Text>
+          {!!s.body && (
+            <Markdown style={sectionMarkdownStyles} rules={markdownRules}>
+              {s.body}
+            </Markdown>
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
 
 function InputBar({
   disabled, onSend, insets,
@@ -458,6 +663,20 @@ const styles = StyleSheet.create({
   aiText: { fontSize: 13, color: colors.navy, lineHeight: 21 },
   cursor: { fontSize: 13, color: colors.mint },
 
+  financeSummary: {
+    backgroundColor: colors.navy, borderRadius: 12,
+    padding: 12, marginBottom: 12,
+  },
+  financeSummaryTitle: {
+    fontSize: 10, fontWeight: '700', color: 'rgba(255,255,255,0.6)',
+    letterSpacing: 0.6, textTransform: 'uppercase', marginBottom: 8,
+  },
+  financeSummaryRow: { flexDirection: 'row', alignItems: 'center' },
+  financeSummaryItem: { flex: 1, alignItems: 'center' },
+  financeSummaryVal: { fontSize: 13, fontWeight: '800', color: colors.white, letterSpacing: -0.3 },
+  financeSummaryLbl: { fontSize: 9.5, color: 'rgba(255,255,255,0.55)', marginTop: 2 },
+  financeSummaryDivider: { width: 0.5, height: 24, backgroundColor: 'rgba(255,255,255,0.15)' },
+
   resultWrap: { marginTop: 12 },
   chipRow: { flexDirection: 'row', gap: 7, marginBottom: 12 },
   chipItem: {
@@ -479,7 +698,7 @@ const styles = StyleSheet.create({
     borderRadius: 14, overflow: 'hidden',
     borderWidth: 0.5, borderColor: colors.border,
   },
-  miniPropImg: { height: 78, position: 'relative' },
+  miniPropImg: { height: 78, position: 'relative', backgroundColor: colors.cardBg, overflow: 'hidden' },
   miniTag: {
     position: 'absolute', top: 6, left: 6,
     backgroundColor: colors.navy, borderRadius: 4,
@@ -508,6 +727,15 @@ const styles = StyleSheet.create({
   loanType: { fontSize: 9.5, color: colors.muted },
   loanRate: { fontSize: 13, fontWeight: '800', color: colors.navy, textAlign: 'right' },
   loanMax: { fontSize: 9.5, color: colors.muted, textAlign: 'right' },
+
+  sectionCard: {
+    backgroundColor: '#F8F7F3', borderWidth: 0.5, borderColor: colors.border,
+    borderRadius: 12, padding: 12, marginBottom: 7,
+  },
+  sectionCardTitle: {
+    fontSize: 11, fontWeight: '700', color: colors.muted,
+    letterSpacing: 0.3, marginBottom: 4,
+  },
 
   reasonBox: {
     backgroundColor: '#F0FAF6', borderWidth: 0.5,
@@ -608,4 +836,82 @@ const markdownStyles = StyleSheet.create({
     height: 1,
     marginVertical: 10,
   },
+  // 표(table) 스타일
+  table: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 8,
+    marginVertical: 8,
+    overflow: 'hidden',
+  },
+  thead: {
+    backgroundColor: colors.navy,
+  },
+  tbody: {},
+  tr: {
+    borderBottomWidth: 1,
+    borderColor: colors.border,
+    flexDirection: 'row',
+  },
+  th: {
+    flex: 1,
+    minWidth: 90,
+    padding: 8,
+  },
+  td: {
+    flex: 1,
+    minWidth: 90,
+    padding: 8,
+  },
 });
+
+// SectionCards 본문(종합 의견/유의사항 등)용 마크다운 스타일 - aiBubble 본문보다 한 단계 작게
+const sectionMarkdownStyles = StyleSheet.create({
+  body: { fontSize: 12, color: colors.navy, lineHeight: 19 },
+  paragraph: { fontSize: 12, color: colors.navy, lineHeight: 19, marginTop: 0, marginBottom: 0 },
+  listItem: { fontSize: 12, color: colors.navy, lineHeight: 19, marginBottom: 2 },
+  strong: { fontWeight: '700', color: colors.navy },
+  em: { fontStyle: 'italic' },
+});
+
+// 표(table) 헤더/셀 텍스트 스타일 (커스텀 렌더 규칙에서 사용)
+const tableTextStyles = StyleSheet.create({
+  th: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: colors.white,
+    lineHeight: 17,
+  },
+  td: {
+    fontSize: 12,
+    color: colors.navy,
+    lineHeight: 17,
+  },
+  scroll: {
+    marginVertical: 4,
+  },
+});
+
+// 마크다운 커스텀 렌더 규칙 (표를 가로 스크롤 가능하게 + 헤더/셀 텍스트 스타일 적용)
+const markdownRules = {
+  table: (node: any, children: any, parent: any, styles: any) => (
+    <ScrollView
+      key={node.key}
+      horizontal
+      showsHorizontalScrollIndicator={false}
+      style={tableTextStyles.scroll}
+    >
+      <View style={styles._VIEW_SAFE_table}>{children}</View>
+    </ScrollView>
+  ),
+  th: (node: any, children: any, parent: any, styles: any) => (
+    <View key={node.key} style={styles._VIEW_SAFE_th}>
+      <Text style={tableTextStyles.th}>{children}</Text>
+    </View>
+  ),
+  td: (node: any, children: any, parent: any, styles: any) => (
+    <View key={node.key} style={styles._VIEW_SAFE_td}>
+      <Text style={tableTextStyles.td}>{children}</Text>
+    </View>
+  ),
+};

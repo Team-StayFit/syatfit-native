@@ -8,6 +8,7 @@ import { router } from 'expo-router';
 import { colors, radius, spacing } from '@/constants/tokens';
 import { usePropertySearch } from '@/hooks/useProperty';
 import { useCheckFavorite, useToggleFavorite } from '@/hooks/useFavorite';
+import PropertyImagePlaceholder from '@/components/PropertyImagePlaceholder';
 
 type ViewMode = 'list' | 'map';
 type FilterType = '전체' | 'TRADING' | 'LEASE';
@@ -212,6 +213,7 @@ function PropertyRow({ item }: { item: any }) {
       }
     >
       <View style={styles.propThumb}>
+        <PropertyImagePlaceholder size={32} style={StyleSheet.absoluteFill} />
         <View style={styles.propTypeTag}>
           <Text style={styles.propTypeText}>{getTypeLabel(item.transactionType)}</Text>
         </View>
@@ -235,13 +237,13 @@ function PropertyRow({ item }: { item: any }) {
         </Text>
         <Text style={styles.propPrice}>{getPriceDisplay()}</Text>
         <View style={styles.propMeta}>
-          {item.parkingRatio && (
+          {!!item.parkingRatio && (
             <Text style={styles.propMetaText}>
               주차 {item.parkingRatio < 10 ? (item.parkingRatio * 100).toFixed(0) : item.parkingRatio.toFixed(0)}%
             </Text>
           )}
-          {item.builder && item.parkingRatio && <View style={styles.metaDot} />}
-          {item.builder && (
+          {!!item.builder && !!item.parkingRatio && <View style={styles.metaDot} />}
+          {!!item.builder && (
             <Text style={styles.propMetaText}>{item.builder}</Text>
           )}
         </View>
